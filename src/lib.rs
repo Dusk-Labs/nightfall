@@ -119,10 +119,7 @@ impl StateManager {
 
         loop {
             match self.try_get(session_id.clone(), chunk) {
-                Ok(x) => {
-                    std::thread::sleep(Duration::from_millis(100));
-                    return Ok(x);
-                }
+                Ok(x) => return Ok(x),
                 Err(e @ NightfallError::SessionDoesntExist) => return Err(e),
                 Err(_) => {}
             }
@@ -184,7 +181,6 @@ impl StateManager {
                     .get(&session_id)
                     .ok_or(NightfallError::SessionDoesntExist)?;
 
-                std::thread::sleep(Duration::from_millis(100)); // sleep for 100ms to make sure the file is flushed
                 Ok(session.init_seg())
             }
             e @ Err(_) => e,
