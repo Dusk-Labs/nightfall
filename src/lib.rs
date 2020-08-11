@@ -86,7 +86,7 @@ impl StateManager {
             file,
             profile,
             0,
-            self.outdir.clone(),
+            format!("{}/{}", self.outdir.clone(), session_id.clone()),
             stream_type,
         );
 

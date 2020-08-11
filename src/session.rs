@@ -153,7 +153,7 @@ impl Session {
 
     /// Method does some math magic to guess if a chunk has been fully written by ffmpeg yet
     pub fn is_chunk_done(&self, chunk_num: u64) -> bool {
-        self.current_chunk() > chunk_num
+        self.current_chunk() > chunk_num + 5
     }
 
     pub fn is_timeout(&self) -> bool {
