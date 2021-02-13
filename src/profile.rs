@@ -1,4 +1,4 @@
-#[derive(Clone, Copy)]
+#[derive(Debug, Eq, PartialEq, Clone, Copy)]
 pub enum StreamType {
     Video,
     Audio,

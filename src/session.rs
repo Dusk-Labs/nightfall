@@ -1,17 +1,26 @@
 use crate::profile::Profile;
 use crate::profile::StreamType;
+use crossbeam::atomic::AtomicCell;
+use std::fmt;
+use std::sync::atomic::AtomicBool;
+use std::time::Instant;
 use std::{
-    cell::Cell,
     collections::HashMap,
     fs,
-    io::{self, BufReader, Read},
+    io::{self, BufRead, BufReader},
     process::{Child, Command, Stdio},
     sync::{
         atomic::{AtomicU64, Ordering::SeqCst},
         Arc, RwLock,
     },
+    time::Duration,
 };
 use stoppable_thread::{self, SimpleAtomicBool, StoppableHandle};
+
+use inotify::Event;
+use inotify::EventMask;
+use inotify::Inotify;
+use inotify::WatchMask;
 
 const CHUNK_SIZE: u64 = 5;
 /// Represents how many chunks we encode before we require a timeout reset.
@@ -29,11 +38,16 @@ pub struct Session {
     file: String,
     profile: Profile,
     outdir: String,
-    process: Cell<Option<StoppableHandle<()>>>,
+    process: AtomicCell<Option<StoppableHandle<()>>>,
     has_started: bool,
+    pub paused: AtomicBool,
     start_number: u64,
     stream_type: StreamType,
     last_chunk: AtomicU64,
+
+    fs_watcher: AtomicCell<Option<Inotify>>,
+    fs_events: Arc<RwLock<Vec<Event<String>>>>,
+    last_reset: AtomicCell<Instant>,
 }
 
 impl Session {
@@ -45,6 +59,12 @@ impl Session {
         outdir: String,
         stream_type: StreamType,
     ) -> Self {
+        let mut fs_watcher = Inotify::init().expect("Failed to init inotify");
+        std::fs::create_dir(&outdir).unwrap();
+        fs_watcher
+            .add_watch(&outdir, WatchMask::CLOSE_WRITE)
+            .unwrap();
+
         Self {
             id,
             outdir,
@@ -52,31 +72,39 @@ impl Session {
             profile,
             stream_type,
             last_chunk: AtomicU64::new(0),
-            process: Cell::new(None),
+            process: AtomicCell::new(None),
+            paused: AtomicBool::new(false),
             has_started: false,
             file: format!("file://{}", file),
+
+            fs_watcher: AtomicCell::new(Some(fs_watcher)),
+            fs_events: Arc::new(RwLock::new(Vec::new())),
+            last_reset: AtomicCell::new(Instant::now()),
         }
     }
 
     pub fn start(&mut self) -> Result<(), io::Error> {
         // make sure we actually have a path to write files to.
         self.has_started = true;
+        self.paused.store(false, SeqCst);
         let _ = fs::create_dir_all(self.outdir.clone());
         let args = self.build_args();
         let mut process = Command::new("/usr/bin/ffmpeg");
 
         process
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(Stdio::piped())
             .args(args.as_slice());
 
         let mut process = TranscodeHandler::new(self.id.clone(), process.spawn()?);
-        self.process = Cell::new(Some(stoppable_thread::spawn(move |signal| {
+        self.process = AtomicCell::new(Some(stoppable_thread::spawn(move |signal| {
             process.handle(signal)
         })));
         Ok(())
     }
 
+    // FIXME: This entire subroutine will silently break streams that have non-standard sepcifications,
+    // such as fps that isnt 24
     fn build_args(&self) -> Vec<&str> {
         let mut args = vec![
             "-ss",
@@ -88,7 +116,8 @@ impl Session {
         match self.stream_type {
             StreamType::Audio => {
                 args.append(&mut vec![
-                    "-copyts", "-map", "0:1", "-c:0", "aac", "-ac", "2", "-ab", "0",
+                    "-copyts", "-map", "0:1", "-c:0", "aac", "-ac", "2", "-ab", "0", "-threads",
+                    "1",
                 ]);
             }
             StreamType::Video => {
@@ -96,6 +125,15 @@ impl Session {
                 args.append(&mut self.profile.to_params().0);
             }
         }
+
+        // args needed for strict keyframing so that video.js plays nicely
+        args.append(&mut vec![
+            "-x264-params",
+            "keyint=120:min-keyint=120;no-scenecut=1",
+        ]);
+
+        // args needed to decrease the chances of a race condition when fetching a segment
+        args.append(&mut vec!["-flush_packets", "1"]);
 
         args.append(&mut vec![
             "-f",
@@ -105,8 +143,17 @@ impl Session {
         ]);
 
         args.append(&mut vec![
+            "-output_ts_offset",
+            string_to_static_str((self.start_number * CHUNK_SIZE).to_string()),
+        ]);
+
+        args.append(&mut vec![
             "-hls_time",
             string_to_static_str(CHUNK_SIZE.to_string()),
+            "-initial_offset",
+            string_to_static_str((self.start_number * CHUNK_SIZE).to_string()),
+            "-reset_timestamps",
+            "1",
             "-force_key_frames",
             "expr:gte(t,n_forced*5)",
         ]);
@@ -128,44 +175,128 @@ impl Session {
     pub fn join(&self) {
         if let Some(x) = self.process.take() {
             x.stop().join();
+            self.paused.store(true, SeqCst);
+            println!("joining thread");
         }
     }
 
+    pub fn get_key(&self, k: &str) -> Result<String, std::option::NoneError> {
+        let session = STREAMING_SESSION.read().unwrap();
+        Ok(session.get(&self.id)?.get(k)?.clone())
+    }
+
     pub fn current_chunk(&self) -> u64 {
-        let frame = |k: &str| -> Result<u64, std::option::NoneError> {
-            {
-                let session = STREAMING_SESSION.read().unwrap();
-                Ok(session.get(&self.id)?.get(k)?.parse::<u64>().unwrap_or(0))
+        let frame = match self.stream_type {
+            StreamType::Audio => {
+                self.get_key("out_time_us")
+                    .map(|x| x.parse::<u64>().unwrap_or(0))
+                    .unwrap_or(0)
+                    / 1000
+                    / 1000
+                    * 24
             }
+            StreamType::Video => self
+                .get_key("frame")
+                .map(|x| x.parse::<u64>().unwrap_or(0))
+                .unwrap_or(0),
         };
 
         match self.stream_type {
-            StreamType::Audio => {
-                (frame("out_time_ms").unwrap_or(0) / (CHUNK_SIZE * 1000)
-                    + (self.start_number * (CHUNK_SIZE * 1000)))
-                    / 5000
-            }
-            StreamType::Video => {
-                frame("frame").unwrap_or(0) / (CHUNK_SIZE * 24) + self.start_number
-            }
+            StreamType::Audio => (frame / (CHUNK_SIZE * 24)).max(self.last_chunk.load(SeqCst)),
+            StreamType::Video => frame / (CHUNK_SIZE * 24) + self.start_number,
         }
+    }
+
+    // returns how many chunks per second
+    pub fn speed(&self) -> f64 {
+        let assumed = match self.stream_type {
+            StreamType::Audio => 10.0,
+            StreamType::Video => 2.0,
+        };
+
+        let fps = self
+            .get_key("speed")
+            .map(|x| x.trim_end_matches('x').to_string())
+            .and_then(|x| x.parse::<f64>().map_err(|_| std::option::NoneError))
+            .unwrap_or(assumed) // assume if key is missing that our speed is 2.0
+            .floor()
+            .max(20.0)
+            * 24.0;
+
+        fps / (CHUNK_SIZE as f64 * 24.0)
+    }
+
+    pub fn eta_for(&self, chunk: u64) -> Duration {
+        if self.stream_type == StreamType::Audio {
+            let lock = STREAMING_SESSION.read().unwrap();
+            if let Some(x) = lock.get(&self.id) {}
+        }
+        let cps = self.speed();
+
+        //        println!("CPS: {} RAW: {:?}", cps, self.get_key("speed"));
+
+        let current_chunk = self.current_chunk() as f64;
+        let diff = (chunk as f64 - current_chunk).abs();
+
+        //        println!("cps: {} cur: {} diff: {}", cps, current_chunk, diff);
+
+        Duration::from_secs((diff / cps).abs().ceil() as u64)
     }
 
     /// Method does some math magic to guess if a chunk has been fully written by ffmpeg yet
     pub fn is_chunk_done(&self, chunk_num: u64) -> bool {
-        self.current_chunk() > chunk_num + 5
+        self.poll_events();
+
+        self.check_inotify(&format!("{}.m4s", chunk_num), EventMask::CLOSE_WRITE)
+    }
+
+    fn poll_events(&self) {
+        let mut buf = [0; 8192];
+        if let Some(mut fs_watcher) = self.fs_watcher.take() {
+            let mut events = fs_watcher
+                .read_events(&mut buf)
+                .unwrap()
+                .map(|x| Event {
+                    wd: x.wd,
+                    mask: x.mask,
+                    cookie: x.cookie,
+
+                    name: x.name.map(|x| x.to_str().unwrap().to_string()),
+                })
+                .collect::<Vec<_>>();
+
+            if !events.is_empty() {
+                // got events
+            }
+
+            self.fs_events.write().unwrap().append(&mut events);
+            self.fs_watcher.swap(Some(fs_watcher));
+        }
+    }
+
+    fn check_inotify(&self, path: &str, mask: EventMask) -> bool {
+        !self
+            .fs_events
+            .read()
+            .unwrap()
+            .iter()
+            .filter(|x| {
+                if let Some(name) = &x.name {
+                    x.mask == mask && name.as_str() == path
+                } else {
+                    false
+                }
+            })
+            .collect::<Vec<_>>()
+            .is_empty()
     }
 
     pub fn is_timeout(&self) -> bool {
-        self.current_chunk() >= self.last_chunk.load(SeqCst) + MAX_CHUNKS_AHEAD
+        Instant::now() > self.last_reset.load() + Duration::from_secs(30)
     }
 
     pub fn reset_timeout(&self, last_requested: u64) {
-        // NOTE: experiment between setting last_chunk to current chunk or taking in the last chunk
-        // requested
-        if self.current_chunk() < last_requested + MAX_CHUNKS_AHEAD {
-            self.last_chunk.store(self.current_chunk(), SeqCst)
-        }
+        self.last_reset.store(Instant::now());
     }
 
     pub fn chunk_to_path(&self, chunk_num: u64) -> String {
@@ -186,11 +317,15 @@ impl Session {
             file: self.file.clone(),
             profile: self.profile,
             outdir: self.outdir.clone(),
-            process: Cell::new(None),
+            process: AtomicCell::new(None),
             start_number: self.start_number,
             stream_type: self.stream_type,
             last_chunk: AtomicU64::new(self.last_chunk.load(SeqCst)),
             has_started: false,
+            paused: AtomicBool::new(true),
+            fs_watcher: AtomicCell::new(self.fs_watcher.take()),
+            fs_events: self.fs_events.clone(),
+            last_reset: AtomicCell::new(Instant::now()),
         }
     }
 
@@ -200,12 +335,26 @@ impl Session {
             file: self.file.clone(),
             profile: self.profile,
             outdir: self.outdir.clone(),
-            process: Cell::new(None),
+            process: AtomicCell::new(None),
             start_number: chunk,
             stream_type: self.stream_type,
             last_chunk: AtomicU64::new(self.last_chunk.load(SeqCst)),
             has_started: false,
+            paused: AtomicBool::new(true),
+            fs_watcher: AtomicCell::new(self.fs_watcher.take()),
+            fs_events: self.fs_events.clone(),
+            last_reset: AtomicCell::new(Instant::now()),
         }
+    }
+}
+
+impl fmt::Debug for Session {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Session")
+            .field("id", &self.id)
+            .field("start_number", &self.start_number)
+            .field("last_chunk", &self.last_chunk)
+            .finish()
     }
 }
 
@@ -220,9 +369,10 @@ impl TranscodeHandler {
     }
 
     fn handle(&mut self, signal: &SimpleAtomicBool) {
-        let mut stdio = BufReader::new(self.process.stdout.take().unwrap());
-        let mut map: HashMap<String, String> = {
-            let mut map = HashMap::new();
+        let stdio = BufReader::new(self.process.stdout.take().unwrap());
+        let mut map: HashMap<String, String> = HashMap::new();
+
+        /*
             map.insert("frame".into(), "0".into());
             map.insert("fps".into(), "0.0".into());
             map.insert("stream_0_0_q".into(), "0.0".into());
@@ -234,26 +384,16 @@ impl TranscodeHandler {
             map.insert("drop_frames".into(), "0".into());
             map.insert("speed".into(), "0.00x".into());
             map.insert("progress".into(), "continue".into());
-            map
-        };
-        let mut out: [u8; 256] = [0; 256];
+        */
+
+        let mut stdio_b = stdio.lines();
 
         'stdout: while !signal.get() {
-            let _ = stdio.read_exact(&mut out);
-            let output = String::from_utf8_lossy(&out);
-            let mut pairs = output
-                .lines()
-                .map(|x| x.split('=').filter(|x| x.len() > 1).collect::<Vec<&str>>())
-                .filter(|x| x.len() == 2)
-                .collect::<Vec<Vec<&str>>>();
+            let output = stdio_b.next().unwrap().unwrap();
+            let output: Vec<&str> = output.split('=').collect();
 
-            pairs.dedup_by(|a, b| a[0].eq(b[0]));
-
-            for pair in pairs {
-                if let Some(v) = map.get_mut(&pair[0].to_string()) {
-                    *v = pair[1].into();
-                }
-            }
+            // remove whitespace on both ends
+            map.insert(output[0].into(), output[1].trim_start().trim_end().into());
 
             {
                 let mut lock = STREAMING_SESSION.write().unwrap();
@@ -278,7 +418,3 @@ impl TranscodeHandler {
 fn string_to_static_str(s: String) -> &'static str {
     Box::leak(s.into_boxed_str())
 }
-
-// FIXME: While i can make the promise that the Cell fields will never be accessed, i should
-// probably (and will) switch to RefCell
-unsafe impl Sync for Session {}

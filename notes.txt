@@ -1,0 +1,8 @@
+Adapt a segqueue approach.
+
+each segment request from the rest api side gets pushed into a segqueue, a thread constantly pops items off this queue
+the item will contain a segment id or index as well as a one shot sender channel to which we can send a result.
+
+the thread will check whether the segment is available and will ensure that the file was fully written then will return
+a path to the file. if the file is not ready or will not be ready by a set deadline then it must restart ffmpeg at a set
+offset to ensure that the file will meet the deadline.

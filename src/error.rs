@@ -5,5 +5,6 @@ pub enum NightfallError {
     SessionDoesntExist,
     ChunkNotDone,
     Timeout,
+    EarlyTimeout,
     Aborted,
 }

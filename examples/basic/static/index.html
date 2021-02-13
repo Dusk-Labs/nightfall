@@ -1,0 +1,29 @@
+<!doctype html>
+<html>
+    <head>
+        <link href="css/video-js.css" rel="stylesheet">
+
+    </head>
+
+    <body>
+        <video id=example-video width=600 height=300 class="video-js vjs-default-skin" controls></video>
+        <script src="js/video.js"></script>
+        <script src="js/videojs-http-streaming.js"></script>
+
+        <script>
+            videojs.Hls.GOAL_BUFFER_LENGTH = 30;
+            videojs.Hls.MAX_GOAL_BUFFER_LENGTH = 30;
+            videojs.log.level('debug');
+            var player = videojs('example-video');
+
+            player.ready(function() {
+                player.src({
+                    src: 'http://127.0.0.1:8000/manifest.mpd',
+                    type: 'application/dash+xml'
+                });
+
+                player.play();
+            });
+        </script>
+    </body>
+</html>

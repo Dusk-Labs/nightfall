@@ -37,7 +37,7 @@
 //! the ID is preserved.
 //!
 //! What happens if two chunks for the same stream are requested simulatenously??
-#![feature(try_trait)]
+#![feature(try_trait, peekable_next_if, result_flattening)]
 #![allow(unused_must_use, dead_code)]
 
 pub mod error;
@@ -48,32 +48,90 @@ mod session;
 use crate::error::*;
 use crate::profile::*;
 use crate::session::Session;
-use dashmap::DashMap;
+
+use std::sync::atomic::Ordering::SeqCst;
 use std::sync::Arc;
+use std::sync::RwLock;
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
+
+use crossbeam::channel::unbounded;
+use crossbeam::channel::Receiver;
+use crossbeam::channel::Sender;
+
+use dashmap::DashMap;
+
+type ChunkRequest = (u64, Sender<Result<String>>);
 
 pub struct StateManager {
     outdir: String,
     sessions: Arc<DashMap<String, Session>>,
-    cleaner: JoinHandle<()>,
+    chunk_requester: Arc<DashMap<String, Sender<ChunkRequest>>>,
+    session_monitors: Arc<RwLock<Vec<JoinHandle<()>>>>,
+    cleaner: Arc<JoinHandle<()>>,
 }
 
 impl StateManager {
     pub fn new(outdir: String) -> Self {
-        let map = Arc::new(DashMap::new());
-        let map_clone = Arc::clone(&map);
+        let sessions = Arc::new(DashMap::new());
+        let map_clone = Arc::clone(&sessions);
+
         Self {
             outdir,
-            sessions: map,
-            cleaner: thread::spawn(move || loop {
+            sessions,
+
+            chunk_requester: Arc::new(DashMap::new()),
+            session_monitors: Arc::new(RwLock::new(Vec::new())),
+
+            cleaner: Arc::new(thread::spawn(move || loop {
                 for v in map_clone.iter() {
                     if v.is_timeout() {
                         v.join();
                     }
                 }
                 thread::sleep(Duration::from_millis(100));
-            }),
+            })),
+        }
+    }
+
+    fn session_monitor(
+        session_id: String,
+        rx: Receiver<ChunkRequest>,
+        sessions: Arc<DashMap<String, Session>>,
+    ) {
+        let mut rx = rx.iter().peekable();
+
+        loop {
+            // peek whether the next item is ready
+            let session = sessions.get(&session_id).unwrap();
+            if let Some((chunk, sender)) = rx.next_if(|(chunk, _)| session.is_chunk_done(*chunk)) {
+                let chunk_path = session.chunk_to_path(chunk);
+                session.reset_timeout(chunk);
+
+                println!("chunk={} chunk_path={}", chunk, chunk_path);
+
+                //                thread::sleep(Duration::from_millis(1000));
+                sender.send(Ok(chunk_path));
+                continue;
+            }
+
+            // check the eta of the next chunk
+            if let Some((chunk, _)) = rx.peek() {
+                // we tolerate a max eta of 10s
+                // if the session is paused but we have a incoming segment ask we start the session
+                if session.eta_for(*chunk).as_millis() > 10000 || session.paused.load(SeqCst) {
+                    sessions.update(&session_id, |_, v| {
+                        v.join();
+
+                        let mut new_session = v.to_new_with_chunk(*chunk);
+                        new_session.start();
+                        new_session
+                    });
+                }
+            }
+
+            // if we get here that means the chunk isnt done yet, so we sleep for a bit.
+            thread::sleep(Duration::from_millis(100));
         }
     }
 
@@ -95,95 +153,79 @@ impl StateManager {
         session_id
     }
 
-    /// Attempt to get a transcoded chunk.
-    pub fn try_get(&self, session_id: String, chunk: u64) -> Result<String> {
-        let session = self
-            .sessions
-            .get(&session_id)
-            .ok_or(NightfallError::SessionDoesntExist)?;
+    fn init_create(&self, session_id: String) -> Sender<ChunkRequest> {
+        // first setup the session monitor
+        let (session_tx, session_rx) = unbounded();
+        let sessions = self.sessions.clone();
+        let session_id_clone = session_id.clone();
+        self.session_monitors
+            .write()
+            .unwrap()
+            .push(thread::spawn(move || {
+                Self::session_monitor(session_id_clone, session_rx, sessions);
+            }));
 
-        if session.is_chunk_done(chunk) {
-            session.reset_timeout(chunk);
-            return Ok(session.chunk_to_path(chunk));
-        }
+        // insert the tx channel into our map
+        self.chunk_requester
+            .insert(session_id.clone(), session_tx.clone());
 
-        Err(NightfallError::ChunkNotDone)
-    }
-
-    /// Attempt to get a transcoded chunk with a timeout.
-    pub fn get_timeout(&self, session_id: String, chunk: u64, timeout: Duration) -> Result<String> {
-        let deadline = match Instant::now().checked_add(timeout) {
-            Some(x) => x,
-            None => return self.try_get(session_id, chunk),
-        };
-
-        loop {
-            match self.try_get(session_id.clone(), chunk) {
-                Ok(x) => return Ok(x),
-                Err(e @ NightfallError::SessionDoesntExist) => return Err(e),
-                Err(_) => {}
-            }
-
-            if Instant::now() >= deadline {
-                return Err(NightfallError::Timeout);
-            }
-        }
-    }
-
-    /// Function starts unstarted streams, waits for a chunk, returns it or otherwise starts a new
-    /// session and tries again.
-    pub fn get_or_create(
-        &self,
-        session_id: String,
-        chunk: u64,
-        timeout: Duration,
-    ) -> Result<String> {
-        // first check if a stream has even been started and if it wasnt started, start it
-        let session = self
-            .sessions
-            .get(&session_id)
-            .ok_or(NightfallError::SessionDoesntExist)?;
-
-        // we only start unstarted streams when we get requests for the first chunk.
-        if !session.has_started() && chunk == 0 {
-            self.sessions.update(&session_id, |_, v| {
-                let mut v = v.to_new();
-                v.start();
-                v
-            });
-        }
-
-        // attempt to grab a chunk.
-        match self.get_timeout(session_id.clone(), chunk, timeout) {
-            Err(NightfallError::Timeout) => {}
-            e @ Ok(_) | e @ Err(_) => return e,
-        }
-
+        // start transcoding
         self.sessions.update(&session_id, |_, v| {
-            // first stop the old session
-            v.join();
-
-            let mut new_session = v.to_new_with_chunk(chunk);
-            new_session.start();
-            new_session
+            let mut v = v.to_new();
+            v.start();
+            v
         });
 
-        self.get_timeout(session_id, chunk, timeout)
-            .map_err(|_| NightfallError::Aborted)
+        session_tx
     }
 
     /// Try to get the init segment of a stream.
-    pub fn init_or_create(&self, session_id: String, timeout: Duration) -> Result<String> {
-        match self.get_or_create(session_id.clone(), 0, timeout) {
-            Ok(_) => {
-                let session = self
-                    .sessions
-                    .get(&session_id)
-                    .ok_or(NightfallError::SessionDoesntExist)?;
+    pub fn init_or_create(&self, session_id: String, _: Duration) -> Result<String> {
+        let session_tx = if self
+            .sessions
+            .get(&session_id)
+            .ok_or(NightfallError::SessionDoesntExist)?
+            .has_started()
+        {
+            self.chunk_requester
+                .get(&session_id)
+                .unwrap()
+                .value()
+                .clone()
+        } else {
+            self.init_create(session_id.clone())
+        };
 
-                Ok(session.init_seg())
-            }
-            e @ Err(_) => e,
-        }
+        let (tx, rx) = unbounded();
+        let chunk_request = (0, tx);
+        session_tx.send(chunk_request);
+
+        // we got here, that means chunk 0 is done.
+        let _path = rx.recv().unwrap();
+
+        let session = self.sessions.get(&session_id).unwrap();
+
+        Ok(session.init_seg())
+    }
+
+    /// Method takes in a session id and chunk and will block until the chunk requested is ready or
+    /// until a timeout.
+    pub fn get_segment(&self, session_id: String, chunk: u64) -> Result<String> {
+        let sender = self
+            .chunk_requester
+            .get(&session_id)
+            .ok_or(NightfallError::SessionDoesntExist)?;
+
+        let (tx, rx) = unbounded();
+        sender.send((chunk, tx));
+
+        rx.recv().unwrap()
+    }
+
+    pub fn exists(&self, session_id: String, chunk: u64) -> Result<()> {
+        self.chunk_requester
+            .get(&session_id)
+            .ok_or(NightfallError::SessionDoesntExist)?;
+        Ok(())
     }
 }
