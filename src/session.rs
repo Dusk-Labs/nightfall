@@ -17,10 +17,14 @@ use std::{
 };
 use stoppable_thread::{self, SimpleAtomicBool, StoppableHandle};
 
-use inotify::Event;
-use inotify::EventMask;
-use inotify::Inotify;
-use inotify::WatchMask;
+cfg_if::cfg_if! {
+    if #[cfg(feature = "fs_events")] {
+        use inotify::Event;
+        use inotify::EventMask;
+        use inotify::Inotify;
+        use inotify::WatchMask;
+    }
+}
 
 const CHUNK_SIZE: u64 = 5;
 /// Represents how many chunks we encode before we require a timeout reset.
@@ -45,8 +49,11 @@ pub struct Session {
     stream_type: StreamType,
     last_chunk: AtomicU64,
 
+    #[cfg(feature = "fs_events")]
     fs_watcher: AtomicCell<Option<Inotify>>,
+    #[cfg(feature = "fs_events")]
     fs_events: Arc<RwLock<Vec<Event<String>>>>,
+
     last_reset: AtomicCell<Instant>,
 }
 
@@ -59,11 +66,16 @@ impl Session {
         outdir: String,
         stream_type: StreamType,
     ) -> Self {
-        let mut fs_watcher = Inotify::init().expect("Failed to init inotify");
         std::fs::create_dir(&outdir).unwrap();
-        fs_watcher
-            .add_watch(&outdir, WatchMask::CLOSE_WRITE)
-            .unwrap();
+
+        cfg_if::cfg_if! {
+            if #[cfg(feature = "fs_events")] {
+                let mut fs_watcher = Inotify::init().expect("Failed to init inotify");
+                fs_watcher
+                    .add_watch(&outdir, WatchMask::CLOSE_WRITE)
+                    .unwrap();
+            }
+        }
 
         Self {
             id,
@@ -77,8 +89,11 @@ impl Session {
             has_started: false,
             file: format!("file://{}", file),
 
+            #[cfg(feature = "fs_events")]
             fs_watcher: AtomicCell::new(Some(fs_watcher)),
+            #[cfg(feature = "fs_events")]
             fs_events: Arc::new(RwLock::new(Vec::new())),
+
             last_reset: AtomicCell::new(Instant::now()),
         }
     }
@@ -142,10 +157,13 @@ impl Session {
             string_to_static_str(self.start_number.to_string()),
         ]);
 
+        /*
+         * FIXME: For some reason this doubles our timestamp lol
         args.append(&mut vec![
             "-output_ts_offset",
             string_to_static_str((self.start_number * CHUNK_SIZE).to_string()),
         ]);
+        */
 
         args.append(&mut vec![
             "-hls_time",
@@ -245,11 +263,25 @@ impl Session {
 
     /// Method does some math magic to guess if a chunk has been fully written by ffmpeg yet
     pub fn is_chunk_done(&self, chunk_num: u64) -> bool {
-        self.poll_events();
-
-        self.check_inotify(&format!("{}.m4s", chunk_num), EventMask::CLOSE_WRITE)
+        cfg_if::cfg_if! {
+            // if fs_events is enabled (as it should be on *nix) we use inotify to check whether a
+            // chunk has been closed by ffmpeg, thus it is ready and wont result in a race
+            // condition when returned.
+            //
+            // if fs_events isnt enabled (as it should be on windows) we estimate whether the chunk
+            // is done by checking whether current_chunk is 5 chunks ahead of the chunk requested.
+            //
+            // NOTE: This will break when seeking, and can result in unstable playback.
+            if #[cfg(feature = "fs_events")] {
+                self.poll_events();
+                self.check_inotify(&format!("{}.m4s", chunk_num), EventMask::CLOSE_WRITE)
+            } else {
+                self.current_chunk() > 5 && self.current_chunk() - 5 >= chunk_num
+            }
+        }
     }
 
+    #[cfg(feature = "fs_events")]
     fn poll_events(&self) {
         let mut buf = [0; 8192];
         if let Some(mut fs_watcher) = self.fs_watcher.take() {
@@ -274,6 +306,7 @@ impl Session {
         }
     }
 
+    #[cfg(feature = "fs_events")]
     fn check_inotify(&self, path: &str, mask: EventMask) -> bool {
         !self
             .fs_events
@@ -323,9 +356,12 @@ impl Session {
             last_chunk: AtomicU64::new(self.last_chunk.load(SeqCst)),
             has_started: false,
             paused: AtomicBool::new(true),
-            fs_watcher: AtomicCell::new(self.fs_watcher.take()),
-            fs_events: self.fs_events.clone(),
             last_reset: AtomicCell::new(Instant::now()),
+
+            #[cfg(feature = "fs_events")]
+            fs_watcher: AtomicCell::new(self.fs_watcher.take()),
+            #[cfg(feature = "fs_events")]
+            fs_events: self.fs_events.clone(),
         }
     }
 
@@ -341,9 +377,12 @@ impl Session {
             last_chunk: AtomicU64::new(self.last_chunk.load(SeqCst)),
             has_started: false,
             paused: AtomicBool::new(true),
-            fs_watcher: AtomicCell::new(self.fs_watcher.take()),
-            fs_events: self.fs_events.clone(),
             last_reset: AtomicCell::new(Instant::now()),
+
+            #[cfg(feature = "fs_events")]
+            fs_watcher: AtomicCell::new(self.fs_watcher.take()),
+            #[cfg(feature = "fs_events")]
+            fs_events: self.fs_events.clone(),
         }
     }
 }
