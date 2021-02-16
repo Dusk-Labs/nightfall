@@ -6,6 +6,10 @@ edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+default = []
+fs_events = ["inotify"]
+
 [dependencies]
 dashmap = "4.0.0-rc6"
 uuid = { version = "0.8.1", features = ["v4"] }
@@ -15,5 +19,6 @@ serde_json = "1.0.57"
 serde = "1.0.115"
 serde_derive = "1.0.115"
 crossbeam = "0.8.0"
-inotify = "0.9.2"
 crossbeam-queue = "0.3.1"
+inotify = { version = "0.9.2", optional = true }
+cfg-if = "1.0.0"
