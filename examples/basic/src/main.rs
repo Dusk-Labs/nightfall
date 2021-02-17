@@ -67,8 +67,10 @@ fn get_manifest(
 }
 
 #[get("/id")]
-fn get_id() -> String {
-    VIDEO_UUID.get_or_init(|| state.create(DEMO_FILE.into(), Profile::High, StreamType::Video));
+fn get_id(state: State<StateManager>) -> String {
+    VIDEO_UUID
+        .get_or_init(|| state.create(DEMO_FILE.into(), Profile::High, StreamType::Video))
+        .clone()
 }
 
 #[get("/is_chunk_ready/<id>/<chunk_num>")]
