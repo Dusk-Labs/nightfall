@@ -25,9 +25,9 @@ fn get_manifest(
     state: State<StateManager>,
     start_num: Option<u64>,
 ) -> Result<Response<'static>, ()> {
-    let info = FFProbeCtx::new("/usr/bin/ffprobe")
-        .get_meta(&std::path::PathBuf::from(DEMO_FILE))
-        .map_err(|_| ())?;
+    let info =
+        dbg!(FFProbeCtx::new("/usr/bin/ffprobe").get_meta(&std::path::PathBuf::from(DEMO_FILE)))
+            .unwrap();
 
     let mut ms = info.get_ms().unwrap().to_string();
     ms.truncate(4);
