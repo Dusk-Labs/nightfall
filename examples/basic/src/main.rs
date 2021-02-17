@@ -8,6 +8,7 @@ use nightfall::{ffprobe::FFProbeCtx, profile::*, StateManager};
 use rocket::State;
 use rocket::{
     http::ContentType,
+    http::Status,
     response::{NamedFile, Response},
 };
 use std::io::Cursor;
@@ -63,6 +64,15 @@ fn get_manifest(
         .header(ContentType::new("application", "dash+xml"))
         .sized_body(Cursor::new(formatted))
         .ok()
+}
+
+#[get("/is_chunk_ready/<id>/<chunk_num>")]
+fn is_chunk_ready(state: State<StateManager>, id: String, chunk_num: u64) -> Status {
+    if state.eta_for_seg(id, chunk_num).unwrap() <= 5 {
+        Status::Ok
+    } else {
+        Status::NoContent
+    }
 }
 
 #[get("/chunks/<id>/init.mp4", rank = 1)]
@@ -152,7 +162,8 @@ fn main() {
                 get_init,
                 get_index,
                 get_static_js,
-                get_static_css
+                get_static_css,
+                is_chunk_ready,
             ],
         )
         .attach(cors.to_cors().unwrap())

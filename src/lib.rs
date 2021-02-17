@@ -37,7 +37,7 @@
 //! the ID is preserved.
 //!
 //! What happens if two chunks for the same stream are requested simulatenously??
-#![feature(try_trait, result_flattening)]
+#![feature(try_trait, result_flattening, peekable_next_if)]
 #![allow(unused_must_use, dead_code)]
 
 pub mod error;
@@ -61,12 +61,21 @@ use crossbeam::channel::Sender;
 
 use dashmap::DashMap;
 
-type ChunkRequest = (u64, Sender<Result<String>>);
+pub enum OpCode {
+    ChunkRequest {
+        chunk: u64,
+        chan: Sender<Result<String>>,
+    },
+    ChunkEta {
+        chunk: u64,
+        chan: Sender<Result<u64>>,
+    },
+}
 
 pub struct StateManager {
     outdir: String,
     sessions: Arc<DashMap<String, Session>>,
-    chunk_requester: Arc<DashMap<String, Sender<ChunkRequest>>>,
+    chunk_requester: Arc<DashMap<String, Sender<OpCode>>>,
     session_monitors: Arc<RwLock<Vec<JoinHandle<()>>>>,
     cleaner: Arc<JoinHandle<()>>,
 }
@@ -96,7 +105,7 @@ impl StateManager {
 
     fn session_monitor(
         session_id: String,
-        rx: Receiver<ChunkRequest>,
+        rx: Receiver<OpCode>,
         sessions: Arc<DashMap<String, Session>>,
     ) {
         let mut rx = rx.iter().peekable();
@@ -104,19 +113,33 @@ impl StateManager {
         loop {
             // peek whether the next item is ready
             let session = sessions.get(&session_id).unwrap();
-            if let Some((chunk, sender)) = rx.next_if(|(chunk, _)| session.is_chunk_done(*chunk)) {
+
+            let item = rx.next_if(|op| {
+                if let OpCode::ChunkRequest { chunk, .. } = op {
+                    return session.is_chunk_done(*chunk);
+                }
+
+                true
+            });
+
+            if let Some(OpCode::ChunkRequest { chunk, chan }) = item {
                 let chunk_path = session.chunk_to_path(chunk);
                 session.reset_timeout(chunk);
 
                 println!("chunk={} chunk_path={}", chunk, chunk_path);
 
                 //                thread::sleep(Duration::from_millis(1000));
-                sender.send(Ok(chunk_path));
+                chan.send(Ok(chunk_path));
+                continue;
+            }
+
+            if let Some(OpCode::ChunkEta { chunk, chan }) = item {
+                chan.send(Ok(session.eta_for(chunk).as_secs()));
                 continue;
             }
 
             // check the eta of the next chunk
-            if let Some((chunk, _)) = rx.peek() {
+            if let Some(OpCode::ChunkRequest { chunk, .. }) = rx.peek() {
                 // we tolerate a max eta of 10s
                 // if the session is paused but we have a incoming segment ask we start the session
                 if session.eta_for(*chunk).as_millis() > 10000 || session.paused.load(SeqCst) {
@@ -153,7 +176,7 @@ impl StateManager {
         session_id
     }
 
-    fn init_create(&self, session_id: String) -> Sender<ChunkRequest> {
+    fn init_create(&self, session_id: String) -> Sender<OpCode> {
         // first setup the session monitor
         let (session_tx, session_rx) = unbounded();
         let sessions = self.sessions.clone();
@@ -197,7 +220,7 @@ impl StateManager {
         };
 
         let (tx, rx) = unbounded();
-        let chunk_request = (0, tx);
+        let chunk_request = OpCode::ChunkRequest { chunk: 0, chan: tx };
         session_tx.send(chunk_request);
 
         // we got here, that means chunk 0 is done.
@@ -216,8 +239,8 @@ impl StateManager {
             .get(&session_id)
             .ok_or(NightfallError::SessionDoesntExist)?;
 
-        let (tx, rx) = unbounded();
-        sender.send((chunk, tx));
+        let (chan, rx) = unbounded();
+        sender.send(OpCode::ChunkRequest { chunk, chan });
 
         rx.recv().unwrap()
     }
@@ -227,5 +250,17 @@ impl StateManager {
             .get(&session_id)
             .ok_or(NightfallError::SessionDoesntExist)?;
         Ok(())
+    }
+
+    pub fn eta_for_seg(&self, session_id: String, chunk: u64) -> Result<u64> {
+        let sender = self
+            .chunk_requester
+            .get(&session_id)
+            .ok_or(NightfallError::SessionDoesntExist)?;
+
+        let (chan, rx) = unbounded();
+        sender.send(OpCode::ChunkEta { chunk, chan });
+
+        rx.recv().unwrap()
     }
 }
