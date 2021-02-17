@@ -325,7 +325,7 @@ impl Session {
     }
 
     pub fn is_timeout(&self) -> bool {
-        Instant::now() > self.last_reset.load() + Duration::from_secs(30)
+        Instant::now() > self.last_reset.load() + Duration::from_secs(10)
     }
 
     pub fn reset_timeout(&self, last_requested: u64) {

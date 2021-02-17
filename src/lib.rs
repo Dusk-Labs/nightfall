@@ -37,7 +37,7 @@
 //! the ID is preserved.
 //!
 //! What happens if two chunks for the same stream are requested simulatenously??
-#![feature(try_trait, peekable_next_if, result_flattening)]
+#![feature(try_trait, result_flattening)]
 #![allow(unused_must_use, dead_code)]
 
 pub mod error;
