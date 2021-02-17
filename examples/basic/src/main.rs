@@ -18,8 +18,11 @@ use std::time::Duration;
 
 const DEMO_FILE: &str = "/home/hinach4n/media/media1/movies/John.Wick.Chapter.3.Parabellum.2019.1080p.AMZN.WEBRip.DD5.1.x264-FGT/John.Wick.Chapter.3.Parabellum.2019.1080p.AMZN.WEBRip.DD5.1.x264-FGT.mkv";
 
-#[get("/manifest.mpd")]
-fn get_manifest(state: State<StateManager>) -> Result<Response<'static>, ()> {
+#[get("/manifest.mpd?<start_num>")]
+fn get_manifest(
+    state: State<StateManager>,
+    start_num: Option<u64>,
+) -> Result<Response<'static>, ()> {
     let info = FFProbeCtx::new("/usr/bin/ffprobe")
         .get_meta(&std::path::PathBuf::from(DEMO_FILE))
         .map_err(|_| ())?;
@@ -52,7 +55,8 @@ fn get_manifest(state: State<StateManager>) -> Result<Response<'static>, ()> {
         duration_string,
         info.get_bitrate(),
         video,
-        video
+        video,
+        start_num.unwrap_or(0)
     );
 
     Response::build()

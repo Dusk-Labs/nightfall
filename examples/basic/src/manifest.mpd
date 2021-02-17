@@ -3,7 +3,7 @@
     <Period duration="{}">
 		<AdaptationSet contentType="video">
             <Representation id="direct" height="1080p" bandwidth="{}" mimeType="video/mp4" codecs="avc1.64001f">
-                <SegmentTemplate timescale="1000" duration="5000" initialization="chunks/{}/init.mp4" media="chunks/{}/$Number$.m4s" startNumber="0">
+                <SegmentTemplate timescale="1000" duration="5000" initialization="chunks/{}/init.mp4" media="chunks/{}/$Number$.m4s" startNumber="{}">
 			    </SegmentTemplate>
 			</Representation>
 		</AdaptationSet>
