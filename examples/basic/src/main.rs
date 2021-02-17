@@ -25,6 +25,7 @@ fn get_manifest(
     state: State<StateManager>,
     start_num: Option<u64>,
 ) -> Result<Response<'static>, ()> {
+    std::fs::File::open(DEMO_FILE).expect("demo file doesnt exist");
     let info =
         dbg!(FFProbeCtx::new("/usr/bin/ffprobe").get_meta(&std::path::PathBuf::from(DEMO_FILE)))
             .unwrap();
