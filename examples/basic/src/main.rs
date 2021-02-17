@@ -18,6 +18,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 const DEMO_FILE: &str = "/home/hinach4n/media/media1/movies/John.Wick.Chapter.3.Parabellum.2019.1080p.AMZN.WEBRip.DD5.1.x264-FGT/John.Wick.Chapter.3.Parabellum.2019.1080p.AMZN.WEBRip.DD5.1.x264-FGT.mkv";
+static VIDEO_UUID: SyncOnceCell<String> = SyncOnceCell::new();
 
 #[get("/manifest.mpd?<start_num>")]
 fn get_manifest(
@@ -44,7 +45,6 @@ fn get_manifest(
         ms
     );
 
-    static VIDEO_UUID: SyncOnceCell<String> = SyncOnceCell::new();
     let video =
         VIDEO_UUID.get_or_init(|| state.create(DEMO_FILE.into(), Profile::High, StreamType::Video));
     let audio = state.create(DEMO_FILE.into(), Profile::Audio, StreamType::Audio);
@@ -64,6 +64,11 @@ fn get_manifest(
         .header(ContentType::new("application", "dash+xml"))
         .sized_body(Cursor::new(formatted))
         .ok()
+}
+
+#[get("/id")]
+fn get_id() -> String {
+    VIDEO_UUID.get().unwrap().clone()
 }
 
 #[get("/is_chunk_ready/<id>/<chunk_num>")]
@@ -164,6 +169,7 @@ fn main() {
                 get_static_js,
                 get_static_css,
                 is_chunk_ready,
+                get_id,
             ],
         )
         .attach(cors.to_cors().unwrap())
