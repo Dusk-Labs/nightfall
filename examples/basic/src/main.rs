@@ -19,6 +19,9 @@ use std::time::Duration;
 
 const DEMO_FILE: &str = "/home/hinach4n/media/media1/movies/John.Wick.Chapter.3.Parabellum.2019.1080p.AMZN.WEBRip.DD5.1.x264-FGT/John.Wick.Chapter.3.Parabellum.2019.1080p.AMZN.WEBRip.DD5.1.x264-FGT.mkv";
 static VIDEO_UUID: SyncOnceCell<String> = SyncOnceCell::new();
+const FFMPEG_BIN: &str = "/usr/bin/ffmpeg";
+const FFPROBE_BIN: &str = "/usr/bin/ffprobe";
+const CACHE_DIR: &str = "/tmp/streaming_cache";
 
 #[get("/manifest.mpd?<start_num>")]
 fn get_manifest(
@@ -26,9 +29,9 @@ fn get_manifest(
     start_num: Option<u64>,
 ) -> Result<Response<'static>, ()> {
     std::fs::File::open(DEMO_FILE).expect("demo file doesnt exist");
+
     let info =
-        dbg!(FFProbeCtx::new("/usr/bin/ffprobe").get_meta(&std::path::PathBuf::from(DEMO_FILE)))
-            .unwrap();
+        dbg!(FFProbeCtx::new(FFPROBE_BIN).get_meta(&std::path::PathBuf::from(DEMO_FILE))).unwrap();
 
     let mut ms = info.get_ms().unwrap().to_string();
     ms.truncate(4);
@@ -159,9 +162,10 @@ fn get_static_css(file: PathBuf) -> Option<NamedFile> {
 
 fn main() {
     let cors: rocket_cors::CorsOptions = Default::default();
+    let state_manager = StateManager::new(CACHE_DIR.into(), FFMPEG_BIN.into(), FFPROBE_BIN.into());
 
     rocket::ignite()
-        .manage(StateManager::new("/tmp/streaming_cache".into()))
+        .manage(state_manager)
         .mount(
             "/",
             routes![

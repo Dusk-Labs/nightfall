@@ -26,6 +26,7 @@ cfg_if::cfg_if! {
     }
 }
 
+/// Length of a chunk in seconds.
 const CHUNK_SIZE: u64 = 5;
 /// Represents how many chunks we encode before we require a timeout reset.
 /// Basically if within MAX_CHUNKS_AHEAD we do not get a timeout reset we kill the stream.
@@ -42,7 +43,9 @@ pub struct Session {
     file: String,
     profile: Profile,
     outdir: String,
+    ffmpeg_bin: String,
     process: AtomicCell<Option<StoppableHandle<()>>>,
+
     has_started: bool,
     pub paused: AtomicBool,
     start_number: u64,
@@ -53,8 +56,6 @@ pub struct Session {
     fs_watcher: AtomicCell<Option<Inotify>>,
     #[cfg(feature = "fs_events")]
     fs_events: Arc<RwLock<Vec<Event<String>>>>,
-
-    last_reset: AtomicCell<Instant>,
 }
 
 impl Session {
@@ -65,6 +66,7 @@ impl Session {
         start_number: u64,
         outdir: String,
         stream_type: StreamType,
+        ffmpeg_bin: String,
     ) -> Self {
         std::fs::create_dir(&outdir).unwrap();
 
@@ -82,19 +84,18 @@ impl Session {
             outdir,
             start_number,
             profile,
+            ffmpeg_bin,
             stream_type,
             last_chunk: AtomicU64::new(0),
             process: AtomicCell::new(None),
             paused: AtomicBool::new(false),
             has_started: false,
-            file: format!("file://{}", file),
+            file,
 
             #[cfg(feature = "fs_events")]
             fs_watcher: AtomicCell::new(Some(fs_watcher)),
             #[cfg(feature = "fs_events")]
             fs_events: Arc::new(RwLock::new(Vec::new())),
-
-            last_reset: AtomicCell::new(Instant::now()),
         }
     }
 
@@ -104,7 +105,7 @@ impl Session {
         self.paused.store(false, SeqCst);
         let _ = fs::create_dir_all(self.outdir.clone());
         let args = self.build_args();
-        let mut process = Command::new("/usr/bin/ffmpeg");
+        let mut process = Command::new(self.ffmpeg_bin.clone());
 
         process
             .stdout(Stdio::piped())
@@ -156,14 +157,6 @@ impl Session {
             "-start_number",
             string_to_static_str(self.start_number.to_string()),
         ]);
-
-        /*
-         * FIXME: For some reason this doubles our timestamp lol
-        args.append(&mut vec![
-            "-output_ts_offset",
-            string_to_static_str((self.start_number * CHUNK_SIZE).to_string()),
-        ]);
-        */
 
         args.append(&mut vec![
             "-hls_time",
@@ -225,23 +218,16 @@ impl Session {
         }
     }
 
-    // returns how many chunks per second
-    pub fn speed(&self) -> f64 {
-        let assumed = match self.stream_type {
-            StreamType::Audio => 10.0,
-            StreamType::Video => 2.0,
-        };
-
-        let fps = self
-            .get_key("speed")
+    pub fn raw_speed(&self) -> f64 {
+        self.get_key("speed")
             .map(|x| x.trim_end_matches('x').to_string())
             .and_then(|x| x.parse::<f64>().map_err(|_| std::option::NoneError))
-            .unwrap_or(assumed) // assume if key is missing that our speed is 2.0
-            .floor()
-            .max(20.0)
-            * 24.0;
+            .unwrap_or(1.0) // assume if key is missing that our speed is 2.0
+    }
 
-        fps / (CHUNK_SIZE as f64 * 24.0)
+    // returns how many chunks per second
+    pub fn speed(&self) -> f64 {
+        (self.raw_speed().floor().max(20.0) * 24.0) / (CHUNK_SIZE as f64 * 24.0)
     }
 
     pub fn eta_for(&self, chunk: u64) -> Duration {
@@ -251,12 +237,8 @@ impl Session {
         }
         let cps = self.speed();
 
-        //        println!("CPS: {} RAW: {:?}", cps, self.get_key("speed"));
-
         let current_chunk = self.current_chunk() as f64;
         let diff = (chunk as f64 - current_chunk).abs();
-
-        //        println!("cps: {} cur: {} diff: {}", cps, current_chunk, diff);
 
         Duration::from_secs((diff / cps).abs().ceil() as u64)
     }
@@ -297,10 +279,6 @@ impl Session {
                 })
                 .collect::<Vec<_>>();
 
-            if !events.is_empty() {
-                // got events
-            }
-
             self.fs_events.write().unwrap().append(&mut events);
             self.fs_watcher.swap(Some(fs_watcher));
         }
@@ -325,11 +303,11 @@ impl Session {
     }
 
     pub fn is_timeout(&self) -> bool {
-        Instant::now() > self.last_reset.load() + Duration::from_secs(10)
+        self.current_chunk() > self.last_chunk.load(SeqCst) + MAX_CHUNKS_AHEAD
     }
 
     pub fn reset_timeout(&self, last_requested: u64) {
-        self.last_reset.store(Instant::now());
+        self.last_chunk.store(last_requested, SeqCst);
     }
 
     pub fn chunk_to_path(&self, chunk_num: u64) -> String {
@@ -350,13 +328,13 @@ impl Session {
             file: self.file.clone(),
             profile: self.profile,
             outdir: self.outdir.clone(),
+            ffmpeg_bin: self.ffmpeg_bin.clone(),
             process: AtomicCell::new(None),
             start_number: self.start_number,
             stream_type: self.stream_type,
             last_chunk: AtomicU64::new(self.last_chunk.load(SeqCst)),
             has_started: false,
             paused: AtomicBool::new(true),
-            last_reset: AtomicCell::new(Instant::now()),
 
             #[cfg(feature = "fs_events")]
             fs_watcher: AtomicCell::new(self.fs_watcher.take()),
@@ -371,13 +349,13 @@ impl Session {
             file: self.file.clone(),
             profile: self.profile,
             outdir: self.outdir.clone(),
+            ffmpeg_bin: self.ffmpeg_bin.clone(),
             process: AtomicCell::new(None),
             start_number: chunk,
             stream_type: self.stream_type,
-            last_chunk: AtomicU64::new(self.last_chunk.load(SeqCst)),
+            last_chunk: AtomicU64::new(chunk),
             has_started: false,
             paused: AtomicBool::new(true),
-            last_reset: AtomicCell::new(Instant::now()),
 
             #[cfg(feature = "fs_events")]
             fs_watcher: AtomicCell::new(self.fs_watcher.take()),
@@ -425,18 +403,20 @@ impl TranscodeHandler {
             map.insert("progress".into(), "continue".into());
         */
 
-        let mut stdio_b = stdio.lines();
+        let mut stdio_b = stdio.lines().peekable();
 
         'stdout: while !signal.get() {
-            let output = stdio_b.next().unwrap().unwrap();
-            let output: Vec<&str> = output.split('=').collect();
+            if stdio_b.peek().is_some() {
+                let output = stdio_b.next().unwrap().unwrap();
+                let output: Vec<&str> = output.split('=').collect();
 
-            // remove whitespace on both ends
-            map.insert(output[0].into(), output[1].trim_start().trim_end().into());
+                // remove whitespace on both ends
+                map.insert(output[0].into(), output[1].trim_start().trim_end().into());
 
-            {
-                let mut lock = STREAMING_SESSION.write().unwrap();
-                let _ = lock.insert(self.id.clone(), map.clone());
+                {
+                    let mut lock = STREAMING_SESSION.write().unwrap();
+                    let _ = lock.insert(self.id.clone(), map.clone());
+                }
             }
 
             match self.process.try_wait() {

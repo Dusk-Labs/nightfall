@@ -74,6 +74,8 @@ pub enum OpCode {
 
 pub struct StateManager {
     outdir: String,
+    ffmpeg_bin: String,
+    ffprobe_bin: String,
     sessions: Arc<DashMap<String, Session>>,
     chunk_requester: Arc<DashMap<String, Sender<OpCode>>>,
     session_monitors: Arc<RwLock<Vec<JoinHandle<()>>>>,
@@ -81,13 +83,15 @@ pub struct StateManager {
 }
 
 impl StateManager {
-    pub fn new(outdir: String) -> Self {
+    pub fn new(outdir: String, ffmpeg_bin: String, ffprobe_bin: String) -> Self {
         let sessions = Arc::new(DashMap::new());
         let map_clone = Arc::clone(&sessions);
 
         Self {
             outdir,
             sessions,
+            ffmpeg_bin,
+            ffprobe_bin,
 
             chunk_requester: Arc::new(DashMap::new()),
             session_monitors: Arc::new(RwLock::new(Vec::new())),
@@ -98,7 +102,7 @@ impl StateManager {
                         v.join();
                     }
                 }
-                thread::sleep(Duration::from_millis(100));
+                thread::sleep(Duration::from_millis(10));
             })),
         }
     }
@@ -140,10 +144,15 @@ impl StateManager {
 
             // check the eta of the next chunk
             if let Some(OpCode::ChunkRequest { chunk, .. }) = rx.peek() {
-                // we tolerate a max eta of 10s
+                // we tolerate a max eta of (10 / raw_speed).
+                // if speed is 1.0x then eta will be 10s.
                 // if the session is paused but we have a incoming segment ask we start the session
-                if session.eta_for(*chunk).as_millis() > 10000 || session.paused.load(SeqCst) {
+                if dbg!(session.eta_for(*chunk).as_millis() as f64)
+                    > dbg!((10000.0 / session.raw_speed()).max(5000.0))
+                    || dbg!(session.paused.load(SeqCst))
+                {
                     sessions.update(&session_id, |_, v| {
+                        println!("eta is too far off, joining");
                         v.join();
 
                         let mut new_session = v.to_new_with_chunk(*chunk);
@@ -169,6 +178,7 @@ impl StateManager {
             0,
             format!("{}/{}", self.outdir.clone(), session_id.clone()),
             stream_type,
+            self.ffmpeg_bin.clone(),
         );
 
         self.sessions.insert(session_id.clone(), new_session);
