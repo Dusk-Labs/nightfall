@@ -70,6 +70,10 @@ pub enum OpCode {
         chunk: u64,
         chan: Sender<Result<u64>>,
     },
+    ShouldClientHardSeek {
+        chunk: u64,
+        chan: Sender<Result<bool>>,
+    },
 }
 
 pub struct StateManager {
@@ -139,6 +143,13 @@ impl StateManager {
 
             if let Some(OpCode::ChunkEta { chunk, chan }) = item {
                 chan.send(Ok(session.eta_for(chunk).as_secs()));
+                continue;
+            }
+
+            if let Some(OpCode::ShouldClientHardSeek { chunk, chan }) = item {
+                chan.send(Ok((session.eta_for(chunk).as_millis() as f64)
+                    > (10_000.0 / session.raw_speed()).max(5_000.0)));
+
                 continue;
             }
 
@@ -270,6 +281,18 @@ impl StateManager {
 
         let (chan, rx) = unbounded();
         sender.send(OpCode::ChunkEta { chunk, chan });
+
+        rx.recv().unwrap()
+    }
+
+    pub fn should_client_hard_seek(&self, session_id: String, chunk: u64) -> Result<bool> {
+        let sender = self
+            .chunk_requester
+            .get(&session_id)
+            .ok_or(NightfallError::SessionDoesntExist)?;
+
+        let (chan, rx) = unbounded();
+        sender.send(OpCode::ShouldClientHardSeek { chunk, chan });
 
         rx.recv().unwrap()
     }

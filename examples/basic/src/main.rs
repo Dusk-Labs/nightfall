@@ -79,10 +79,10 @@ fn get_id(state: State<StateManager>) -> String {
 
 #[get("/is_chunk_ready/<id>/<chunk_num>")]
 fn is_chunk_ready(state: State<StateManager>, id: String, chunk_num: u64) -> Status {
-    if state.eta_for_seg(id, chunk_num).unwrap() <= 5 {
-        Status::Ok
-    } else {
+    if state.should_client_hard_seek(id, chunk_num).unwrap() {
         Status::NoContent
+    } else {
+        Status::Ok
     }
 }
 
