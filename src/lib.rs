@@ -133,10 +133,6 @@ impl StateManager {
             if let Some(OpCode::ChunkRequest { chunk, chan }) = item {
                 let chunk_path = session.chunk_to_path(chunk);
                 session.reset_timeout(chunk);
-
-                println!("chunk={} chunk_path={}", chunk, chunk_path);
-
-                //                thread::sleep(Duration::from_millis(1000));
                 chan.send(Ok(chunk_path));
                 continue;
             }
@@ -147,6 +143,14 @@ impl StateManager {
             }
 
             if let Some(OpCode::ShouldClientHardSeek { chunk, chan }) = item {
+                // if we are seeking backwards we always want to restart the stream
+                // This is because our init.mp4 gets overwritten if we seeked forward at some point
+                // Furthermore we want to hard seek anyway if the player is browser based.
+                if chunk < session.start_number {
+                    chan.send(Ok(true));
+                    continue;
+                }
+
                 chan.send(Ok((session.eta_for(chunk).as_millis() as f64)
                     > (10_000.0 / session.raw_speed()).max(5_000.0)));
 
@@ -155,15 +159,26 @@ impl StateManager {
 
             // check the eta of the next chunk
             if let Some(OpCode::ChunkRequest { chunk, .. }) = rx.peek() {
+                // if the chunk being requested is less than the starting chunk of this session we
+                // want to hard seek.
+                if *chunk < session.start_number {
+                    sessions.update(&session_id, |_, v| {
+                        v.join();
+
+                        let mut new_session = v.to_new_with_chunk(*chunk);
+                        new_session.start();
+                        new_session
+                    });
+                }
+
                 // we tolerate a max eta of (10 / raw_speed).
                 // if speed is 1.0x then eta will be 10s.
                 // if the session is paused but we have a incoming segment ask we start the session
-                if dbg!(session.eta_for(*chunk).as_millis() as f64)
-                    > dbg!((10000.0 / session.raw_speed()).max(5000.0))
-                    || dbg!(session.paused.load(SeqCst))
+                if session.eta_for(*chunk).as_millis() as f64
+                    > (10000.0 / session.raw_speed()).max(5000.0)
+                    || session.paused.load(SeqCst)
                 {
                     sessions.update(&session_id, |_, v| {
-                        println!("eta is too far off, joining");
                         v.join();
 
                         let mut new_session = v.to_new_with_chunk(*chunk);

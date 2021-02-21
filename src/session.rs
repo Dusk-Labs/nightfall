@@ -48,7 +48,7 @@ pub struct Session {
 
     has_started: bool,
     pub paused: AtomicBool,
-    start_number: u64,
+    pub start_number: u64,
     stream_type: StreamType,
     last_chunk: AtomicU64,
 
@@ -258,7 +258,7 @@ impl Session {
                 self.poll_events();
                 self.check_inotify(&format!("{}.m4s", chunk_num), EventMask::CLOSE_WRITE)
             } else {
-                self.current_chunk() > 5 && self.current_chunk() - 5 >= chunk_num
+                chunk_num >= self.start_number && (self.current_chunk() > 5 && self.current_chunk() - 5 >= chunk_num)
             }
         }
     }
