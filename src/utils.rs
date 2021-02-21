@@ -18,6 +18,7 @@ cfg_if::cfg_if! {
         use winapi::um::winnt::PROCESS_ALL_ACCESS;
 
         pub fn pause_proc(pid: i32) {
+            println!("DBG PAUSING PID {}", pid);
             unsafe {
                 let process_handle = OpenProcess(PROCESS_ALL_ACCESS, 0, pid as u32);
                 NtSuspendProcess(process_handle);
@@ -25,6 +26,7 @@ cfg_if::cfg_if! {
         }
 
         pub fn cont_proc(pid: i32) {
+            println!("DBG RESUMING PID {}", pid);
             unsafe {
                 let process_handle = OpenProcess(PROCESS_ALL_ACCESS, 0, pid as u32);
                 NtResumeProcess(process_handle);
