@@ -7,5 +7,12 @@
 			    </SegmentTemplate>
 			</Representation>
 		</AdaptationSet>
+
+        <AdaptationSet contentType="audio" lang="eng">
+			<Representation id="audio" mimeType="audio/mp4" codecs="mp4a.40.2" bandwidth="120000">
+                <SegmentTemplate timescale="1000" duration="5000" initialization="chunks/{}/init.mp4" media="chunks/{}/$Number$.m4s" startNumber="{}">
+                </SegmentTemplate>
+			</Representation>
+		</AdaptationSet>
 	</Period>
 </MPD>

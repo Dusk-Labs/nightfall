@@ -19,6 +19,7 @@ use std::time::Duration;
 
 const DEMO_FILE: &str = "/home/hinach4n/media/media1/movies/John.Wick.Chapter.3.Parabellum.2019.1080p.AMZN.WEBRip.DD5.1.x264-FGT/John.Wick.Chapter.3.Parabellum.2019.1080p.AMZN.WEBRip.DD5.1.x264-FGT.mkv";
 static VIDEO_UUID: SyncOnceCell<String> = SyncOnceCell::new();
+static AUDIO_UUID: SyncOnceCell<String> = SyncOnceCell::new();
 const FFMPEG_BIN: &str = "/usr/bin/ffmpeg";
 const FFPROBE_BIN: &str = "/usr/bin/ffprobe";
 const CACHE_DIR: &str = "/tmp/streaming_cache";
@@ -30,8 +31,9 @@ fn get_manifest(
 ) -> Result<Response<'static>, ()> {
     std::fs::File::open(DEMO_FILE).expect("demo file doesnt exist");
 
-    let info =
-        dbg!(FFProbeCtx::new(FFPROBE_BIN).get_meta(&std::path::PathBuf::from(DEMO_FILE))).unwrap();
+    let info = FFProbeCtx::new(FFPROBE_BIN)
+        .get_meta(&std::path::PathBuf::from(DEMO_FILE))
+        .unwrap();
 
     let mut ms = info.get_ms().unwrap().to_string();
     ms.truncate(4);
@@ -51,9 +53,9 @@ fn get_manifest(
 
     let video =
         VIDEO_UUID.get_or_init(|| state.create(DEMO_FILE.into(), Profile::High, StreamType::Video));
-    let audio = state.create(DEMO_FILE.into(), Profile::Audio, StreamType::Audio);
+    let audio = AUDIO_UUID
+        .get_or_init(|| state.create(DEMO_FILE.into(), Profile::Audio, StreamType::Audio));
 
-    println!("codec: {:?}", info);
     let formatted = format!(
         include_str!("./manifest.mpd"),
         duration_string,
@@ -61,6 +63,9 @@ fn get_manifest(
         info.get_bitrate(),
         video,
         video,
+        start_num.unwrap_or(0),
+        audio,
+        audio,
         start_num.unwrap_or(0)
     );
 
