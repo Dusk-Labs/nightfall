@@ -13,8 +13,9 @@ cfg_if::cfg_if! {
         }
     } else {
         use winapi::um::processthreadsapi::OpenProcess;
-        use winapi::um::winnt::HANDLE;
         use ntapi::ntpsapi::NtSuspendProcess;
+        use ntapi::ntpsapi::NtResumeProcess;
+        use winapi::um::winnt::PROCESS_ALL_ACCESS;
 
         pub fn pause_proc(pid: i32) {
             unsafe {
