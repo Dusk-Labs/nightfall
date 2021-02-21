@@ -22,3 +22,10 @@ crossbeam = "0.8.0"
 crossbeam-queue = "0.3.1"
 inotify = { version = "0.9.2", optional = true }
 cfg-if = "1.0.0"
+
+[target.'cfg(unix)'.dependencies]
+nix = "0.20.0"
+
+[target.'cfg(windows)'.dependencies]
+winapi = "*"
+ntapi = "*"

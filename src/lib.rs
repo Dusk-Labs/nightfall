@@ -44,6 +44,7 @@ pub mod error;
 pub mod ffprobe;
 pub mod profile;
 mod session;
+pub mod utils;
 
 use crate::error::*;
 use crate::profile::*;
@@ -103,7 +104,7 @@ impl StateManager {
             cleaner: Arc::new(thread::spawn(move || loop {
                 for v in map_clone.iter() {
                     if v.is_timeout() {
-                        v.join();
+                        v.pause();
                     }
                 }
                 thread::sleep(Duration::from_millis(10));
@@ -171,12 +172,15 @@ impl StateManager {
                     });
                 }
 
+                // if we get here, and the session is paused we need to start it again.
+                if session.paused.load(SeqCst) {
+                    session.cont();
+                }
+
                 // we tolerate a max eta of (10 / raw_speed).
                 // if speed is 1.0x then eta will be 10s.
-                // if the session is paused but we have a incoming segment ask we start the session
                 if session.eta_for(*chunk).as_millis() as f64
-                    > (10000.0 / session.raw_speed()).max(5000.0)
-                    || session.paused.load(SeqCst)
+                    > (10_000.0 / session.raw_speed()).max(5_000.0)
                 {
                     sessions.update(&session_id, |_, v| {
                         v.join();

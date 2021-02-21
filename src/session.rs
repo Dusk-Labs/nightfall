@@ -52,6 +52,8 @@ pub struct Session {
     stream_type: StreamType,
     last_chunk: AtomicU64,
 
+    child_pid: Option<u32>,
+
     #[cfg(feature = "fs_events")]
     fs_watcher: AtomicCell<Option<Inotify>>,
     #[cfg(feature = "fs_events")]
@@ -90,6 +92,7 @@ impl Session {
             process: AtomicCell::new(None),
             paused: AtomicBool::new(false),
             has_started: false,
+            child_pid: None,
             file,
 
             #[cfg(feature = "fs_events")]
@@ -105,14 +108,15 @@ impl Session {
         self.paused.store(false, SeqCst);
         let _ = fs::create_dir_all(self.outdir.clone());
         let args = self.build_args();
-        let mut process = Command::new(self.ffmpeg_bin.clone());
-
-        process
+        let mut process = Command::new(self.ffmpeg_bin.clone())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .args(args.as_slice());
+            .args(args.as_slice())
+            .spawn()?;
 
-        let mut process = TranscodeHandler::new(self.id.clone(), process.spawn()?);
+        self.child_pid = Some(process.id());
+
+        let mut process = TranscodeHandler::new(self.id.clone(), process);
         self.process = AtomicCell::new(Some(stoppable_thread::spawn(move |signal| {
             process.handle(signal)
         })));
@@ -186,8 +190,20 @@ impl Session {
     pub fn join(&self) {
         if let Some(x) = self.process.take() {
             x.stop().join();
+        }
+    }
+
+    pub fn pause(&self) {
+        if let Some(x) = self.child_pid {
+            crate::utils::pause_proc(x as i32);
             self.paused.store(true, SeqCst);
-            println!("joining thread");
+        }
+    }
+
+    pub fn cont(&self) {
+        if let Some(x) = self.child_pid {
+            crate::utils::cont_proc(x as i32);
+            self.paused.store(false, SeqCst);
         }
     }
 
@@ -335,6 +351,7 @@ impl Session {
             last_chunk: AtomicU64::new(self.last_chunk.load(SeqCst)),
             has_started: false,
             paused: AtomicBool::new(true),
+            child_pid: None,
 
             #[cfg(feature = "fs_events")]
             fs_watcher: AtomicCell::new(self.fs_watcher.take()),
@@ -356,6 +373,7 @@ impl Session {
             last_chunk: AtomicU64::new(chunk),
             has_started: false,
             paused: AtomicBool::new(true),
+            child_pid: None,
 
             #[cfg(feature = "fs_events")]
             fs_watcher: AtomicCell::new(self.fs_watcher.take()),
