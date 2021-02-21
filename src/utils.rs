@@ -5,10 +5,12 @@ cfg_if::cfg_if! {
         use nix::unistd::Pid;
 
         pub fn pause_proc(pid: i32) {
+            println!("DBG PAUSING PID {}", pid);
             signal::kill(Pid::from_raw(pid), Signal::SIGSTOP);
         }
 
         pub fn cont_proc(pid: i32) {
+            println!("DBG RESUMING PID {}", pid);
             signal::kill(Pid::from_raw(pid), Signal::SIGCONT);
         }
     } else {
