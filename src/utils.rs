@@ -18,15 +18,15 @@ cfg_if::cfg_if! {
 
         pub fn pause_proc(pid: i32) {
             unsafe {
-                let process_handle = OpenProcess(PROCESS_ALL_ACCESS, false, pid as u32);
-                NtSuspendProcess(process_handle)
+                let process_handle = OpenProcess(PROCESS_ALL_ACCESS, 0, pid as u32);
+                NtSuspendProcess(process_handle);
             }
         }
 
         pub fn cont_proc(pid: i32) {
             unsafe {
-                let process_handle = OpenProcess(PROCESS_ALL_ACCESS, false, pid as u32);
-                NtResumeProcess(process_handle)
+                let process_handle = OpenProcess(PROCESS_ALL_ACCESS, 0, pid as u32);
+                NtResumeProcess(process_handle);
             }
         }
     }
