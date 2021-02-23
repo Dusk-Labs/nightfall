@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { MediaPlayer } from "dashjs";
+import { MediaPlayer, Debug } from "dashjs";
 import VideoControls from "./VideoControls";
 import { VideoPlayerContext } from "./Context";
 
@@ -26,6 +26,12 @@ function VideoPlayer() {
     player.initialize(video.current, url, false);
 
     player.setInitialMediaSettingsFor("video", {bufferToKeep: 30})
+    
+    player.updateSettings({
+      "debug": {
+          "logLevel": Debug.LOG_LEVEL_INFO
+      }
+    });
 
     setPlayer(player);
   }, []);
