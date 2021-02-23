@@ -37,13 +37,18 @@
 //! the ID is preserved.
 //!
 //! What happens if two chunks for the same stream are requested simulatenously??
-#![feature(try_trait, result_flattening, peekable_next_if)]
+#![feature(try_trait, result_flattening)]
 #![allow(unused_must_use, dead_code)]
 
+/// Contains all the error types for this crate.
 pub mod error;
+/// Helper methods to probe a mediafile for metadata.
 pub mod ffprobe;
+/// Contains our profiles as well as their respective args.
 pub mod profile;
+/// Contains the struct representing a streaming session.
 mod session;
+/// Contains utils that make my life easier.
 pub mod utils;
 
 use crate::error::*;
@@ -54,7 +59,7 @@ use std::sync::atomic::Ordering::SeqCst;
 use std::sync::Arc;
 use std::sync::RwLock;
 use std::thread::{self, JoinHandle};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use crossbeam::channel::unbounded;
 use crossbeam::channel::Receiver;
@@ -62,28 +67,49 @@ use crossbeam::channel::Sender;
 
 use dashmap::DashMap;
 
+/// Represents a operation that a route can dispatch to the state manager.
 pub enum OpCode {
+    /// This operation is used when a client has requested a chunk of a stream.
     ChunkRequest {
         chunk: u64,
         chan: Sender<Result<String>>,
     },
+    /// This operation is used to find out the ETA of a chunk.
     ChunkEta {
         chunk: u64,
         chan: Sender<Result<u64>>,
     },
+    /// Operation is used to determine whether the client should hard seek or not
+    ///
+    /// FIXME: This opcode is mainly here for compatibility with dash.js, when seeking in browsers we
+    /// require the reload of a manifest to avoid the player freezing and entering a request next
+    /// chunk loop.
     ShouldClientHardSeek {
         chunk: u64,
         chan: Sender<Result<bool>>,
     },
 }
 
+/// This is our state manager. It keeps track of all of our transcoding sessions.
+/// Cleans up sessions that have time outted.
 pub struct StateManager {
+    /// The directory where we store session artifacts.
     outdir: String,
+    /// Path to ffmpeg on disk.
     ffmpeg_bin: String,
+    /// Path to ffprobe on disk.
     ffprobe_bin: String,
+
+    /// Contains all of our sessions keyed by their session id.
     sessions: Arc<DashMap<String, Session>>,
+    /// Contains all of our Sender channels keyed by their respective session id.
+    /// When we want to request a chunk or get information on a session we have to look up a sender
+    /// in this map first.
     chunk_requester: Arc<DashMap<String, Sender<OpCode>>>,
+    /// This is the receiver side of our operations. Each thread serves one session and basically
+    /// answers all operations and answers them accordingly.
     session_monitors: Arc<RwLock<Vec<JoinHandle<()>>>>,
+    /// Cleaner thread reaps sessions that have time outed.
     cleaner: Arc<JoinHandle<()>>,
 }
 
@@ -243,7 +269,7 @@ impl StateManager {
     }
 
     /// Try to get the init segment of a stream.
-    pub fn init_or_create(&self, session_id: String, _: Duration) -> Result<String> {
+    pub fn init_or_create(&self, session_id: String) -> Result<String> {
         let session_tx = if self
             .sessions
             .get(&session_id)
@@ -252,7 +278,7 @@ impl StateManager {
         {
             self.chunk_requester
                 .get(&session_id)
-                .unwrap()
+                .ok_or(NightfallError::SessionDoesntExist)?
                 .value()
                 .clone()
         } else {
@@ -264,9 +290,12 @@ impl StateManager {
         session_tx.send(chunk_request);
 
         // we got here, that means chunk 0 is done.
-        let _path = rx.recv().unwrap();
+        let _path = rx.recv();
 
-        let session = self.sessions.get(&session_id).unwrap();
+        let session = self
+            .sessions
+            .get(&session_id)
+            .ok_or(NightfallError::SessionDoesntExist)?;
 
         Ok(session.init_seg())
     }
@@ -282,10 +311,10 @@ impl StateManager {
         let (chan, rx) = unbounded();
         sender.send(OpCode::ChunkRequest { chunk, chan });
 
-        rx.recv().unwrap()
+        rx.recv().map_err(|_| NightfallError::Aborted).flatten()
     }
 
-    pub fn exists(&self, session_id: String, chunk: u64) -> Result<()> {
+    pub fn exists(&self, session_id: String) -> Result<()> {
         self.chunk_requester
             .get(&session_id)
             .ok_or(NightfallError::SessionDoesntExist)?;
@@ -301,7 +330,7 @@ impl StateManager {
         let (chan, rx) = unbounded();
         sender.send(OpCode::ChunkEta { chunk, chan });
 
-        rx.recv().unwrap()
+        rx.recv().map_err(|_| NightfallError::Aborted).flatten()
     }
 
     pub fn should_client_hard_seek(&self, session_id: String, chunk: u64) -> Result<bool> {
@@ -313,6 +342,6 @@ impl StateManager {
         let (chan, rx) = unbounded();
         sender.send(OpCode::ShouldClientHardSeek { chunk, chan });
 
-        rx.recv().unwrap()
+        rx.recv().map_err(|_| NightfallError::Aborted).flatten()
     }
 }
