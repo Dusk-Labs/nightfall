@@ -1,9 +1,10 @@
 .seekBar {
+  grid-area: seekbar;
   position: relative;
   height: 10px;
-  background: #1a1a1a;
+  background: #3a3a3a;
   border-radius: 5px;
-  width: 960px;
+  width: 100%;
   cursor: pointer;
   overflow: hidden;
   z-index: 0;
@@ -16,7 +17,7 @@
 
   .buffer {
     position: absolute;
-    background: #3a3a3a;
+    background: #4a4a4a;
     z-index: -1;
   }
 
