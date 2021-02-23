@@ -69,6 +69,8 @@ use dashmap::DashMap;
 
 /// Represents a operation that a route can dispatch to the state manager.
 pub enum OpCode {
+    /// Represents a request for a init chunk.
+    ChunkInitRequest { chan: Sender<Result<String>> },
     /// This operation is used when a client has requested a chunk of a stream.
     ChunkRequest {
         chunk: u64,
@@ -152,6 +154,8 @@ impl StateManager {
             let item = rx.next_if(|op| {
                 if let OpCode::ChunkRequest { chunk, .. } = op {
                     return session.is_chunk_done(*chunk);
+                } else if let OpCode::ChunkInitRequest { .. } = op {
+                    return session.is_chunk_done(session.start_number);
                 }
 
                 true
@@ -160,6 +164,12 @@ impl StateManager {
             if let Some(OpCode::ChunkRequest { chunk, chan }) = item {
                 let chunk_path = session.chunk_to_path(chunk);
                 session.reset_timeout(chunk);
+                chan.send(Ok(chunk_path));
+                continue;
+            }
+
+            if let Some(OpCode::ChunkInitRequest { chan }) = item {
+                let chunk_path = session.chunk_to_path(session.start_number);
                 chan.send(Ok(chunk_path));
                 continue;
             }
@@ -286,7 +296,7 @@ impl StateManager {
         };
 
         let (tx, rx) = unbounded();
-        let chunk_request = OpCode::ChunkRequest { chunk: 0, chan: tx };
+        let chunk_request = OpCode::ChunkInitRequest { chan: tx };
         session_tx.send(chunk_request);
 
         // we got here, that means chunk 0 is done.
