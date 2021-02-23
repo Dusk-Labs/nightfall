@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { MediaPlayer } from "dashjs";
+import { MediaPlayer, Debug } from "dashjs";
 import VideoControls from "./VideoControls";
 import { VideoPlayerContext } from "./Context";
 
@@ -37,7 +37,15 @@ function VideoPlayer() {
     const url = "http://localhost:8000/manifest.mpd";
     const player = MediaPlayer().create();
 
-    player.initialize(video.current, url, true);
+    player.initialize(video.current, url, false);
+
+    player.setInitialMediaSettingsFor("video", {bufferToKeep: 30})
+
+    player.updateSettings({
+      "debug": {
+          "logLevel": Debug.LOG_LEVEL_INFO
+      }
+    });
 
     setPlayer(player);
   }, []);
