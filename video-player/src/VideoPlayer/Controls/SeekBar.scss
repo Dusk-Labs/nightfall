@@ -1,6 +1,6 @@
 .seekBar {
   position: relative;
-  height: 20px;
+  height: 10px;
   background: #1a1a1a;
   border-radius: 5px;
   width: 960px;
@@ -11,7 +11,6 @@
   .buffer, .current {
     height: inherit;
     width: 0;
-    border-radius: 5px;
     pointer-events: none;
   }
 
