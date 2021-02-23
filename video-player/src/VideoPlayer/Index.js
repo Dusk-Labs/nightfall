@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { MediaPlayer, Debug } from "dashjs";
+import { MediaPlayer } from "dashjs";
 import VideoControls from "./VideoControls";
 import { VideoPlayerContext } from "./Context";
 
@@ -18,6 +18,7 @@ function VideoPlayer() {
   const [paused, setPaused] = useState(false);
   const [offset, setOffset] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
+  const [oldOffset, setOldOffset] = useState(0);
   const [duration, setDuration] = useState(0);
 
   useEffect(() => {
@@ -39,12 +40,6 @@ function VideoPlayer() {
     player.initialize(video.current, url, true);
 
     player.setInitialMediaSettingsFor("video")
-
-    player.updateSettings({
-      "debug": {
-          "logLevel": Debug.LOG_LEVEL_DEBUG
-      }
-    });
 
     setPlayer(player);
   }, []);
@@ -75,9 +70,14 @@ function VideoPlayer() {
     // console.log("[Video] waiting", e);
   }, []);
 
+  /*
+    Seeking first time to 100s results in video.time starting from 0s
+    Seeking second time to 200s results in video.time taking the old seek position starting from 100s
+    OldOffset undos that and sets it back to 0s for consistency and to keep track of seekbar position accurately
+  */
   const ePlayBackTimeUpdated = useCallback((e) => {
-    setCurrentTime(Math.round(offset + e.time));
-  }, [offset]);
+    setCurrentTime(Math.floor(offset + (e.time - oldOffset)));
+  }, [offset, oldOffset]);
 
   // video events
   useEffect(() => {
@@ -110,6 +110,7 @@ function VideoPlayer() {
     setCurrentTime,
     currentTime,
     duration,
+    setOldOffset,
     setPlayer,
     offset,
     setOffset,

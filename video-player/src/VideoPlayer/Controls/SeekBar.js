@@ -4,7 +4,7 @@ import { VideoPlayerContext } from "../Context";
 import "./SeekBar.scss";
 
 function VideoControls() {
-  const { player, duration, offset, currentTime, setOffset, buffer } = useContext(VideoPlayerContext);
+  const { setOldOffset, setCurrentTime, player, duration, offset, currentTime, setOffset, buffer } = useContext(VideoPlayerContext);
   const [ seeking, setSeeking ] = useState(false);
 
   const seekBarCurrent = useRef(null);
@@ -37,10 +37,12 @@ function VideoControls() {
 
     player.attachSource(`http://localhost:8000/manifest.mpd?start_num=${newSegment}`);
 
-    setOffset(oldOffset => Math.round(oldOffset - newTime));
+    setOldOffset(offset);
+    setOffset(newTime);
+    setCurrentTime(0);
     setSeeking(false);
     player.play();
-  }, [player, seeking, setOffset]);
+  }, [offset, player, seeking, setCurrentTime, setOffset, setOldOffset]);
 
   return (
     <div className="seekBar" onClick={onSeek}>
