@@ -1,20 +1,25 @@
 use crate::profile::Profile;
 use crate::profile::StreamType;
-use crossbeam::atomic::AtomicCell;
+
+use std::collections::HashMap;
 use std::fmt;
+use std::fs;
+use std::io;
+
+use std::io::BufRead;
+use std::io::BufReader;
+use std::process::Child;
+use std::process::Command;
+use std::process::Stdio;
+use std::time::Duration;
+
 use std::sync::atomic::AtomicBool;
-use std::time::Instant;
-use std::{
-    collections::HashMap,
-    fs,
-    io::{self, BufRead, BufReader},
-    process::{Child, Command, Stdio},
-    sync::{
-        atomic::{AtomicU64, Ordering::SeqCst},
-        Arc, RwLock,
-    },
-    time::Duration,
-};
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering::SeqCst;
+use std::sync::Arc;
+use std::sync::RwLock;
+
+use crossbeam::atomic::AtomicCell;
 use stoppable_thread::{self, SimpleAtomicBool, StoppableHandle};
 
 cfg_if::cfg_if! {
@@ -34,6 +39,8 @@ const CHUNK_SIZE: u64 = 5;
 const MAX_CHUNKS_AHEAD: u64 = 15;
 
 lazy_static::lazy_static! {
+    /// This static contains stats about each stream. It is a Map of maps containing k/v pairs
+    /// parsed from the ffmpeg stdout. Each Map is keyed by a session id.
     pub static ref STREAMING_SESSION: Arc<RwLock<HashMap<String, HashMap<String, String>>>> =
         Arc::new(RwLock::new(HashMap::new()));
 }
@@ -108,7 +115,8 @@ impl Session {
         self.paused.store(false, SeqCst);
         let _ = fs::create_dir_all(self.outdir.clone());
         let args = self.build_args();
-        let mut process = Command::new(self.ffmpeg_bin.clone())
+
+        let process = Command::new(self.ffmpeg_bin.clone())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .args(args.as_slice())
@@ -117,9 +125,11 @@ impl Session {
         self.child_pid = Some(process.id());
 
         let mut process = TranscodeHandler::new(self.id.clone(), process);
+
         self.process = AtomicCell::new(Some(stoppable_thread::spawn(move |signal| {
             process.handle(signal)
         })));
+
         Ok(())
     }
 
@@ -247,10 +257,6 @@ impl Session {
     }
 
     pub fn eta_for(&self, chunk: u64) -> Duration {
-        if self.stream_type == StreamType::Audio {
-            let lock = STREAMING_SESSION.read().unwrap();
-            if let Some(x) = lock.get(&self.id) {}
-        }
         let cps = self.speed();
 
         let current_chunk = self.current_chunk() as f64;
