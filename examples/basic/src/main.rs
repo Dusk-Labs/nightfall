@@ -93,9 +93,7 @@ fn is_chunk_ready(state: State<StateManager>, id: String, chunk_num: u64) -> Sta
 
 #[get("/chunks/<id>/init.mp4", rank = 1)]
 fn get_init(state: State<StateManager>, id: String) -> Result<Option<NamedFile>, ()> {
-    let path = state
-        .init_or_create(id, Duration::from_millis(5000))
-        .unwrap();
+    let path = state.init_or_create(id).unwrap();
 
     Ok(NamedFile::open(path).ok())
 }
@@ -130,9 +128,9 @@ fn get_chunks(
         .parse::<u64>()
         .unwrap_or(0);
 
-    if let Err(_) = state.exists(id.clone(), chunk_num) {
+    if let Err(_) = state.exists(id.clone()) {
         state
-            .init_or_create(id.clone(), Duration::from_millis(5000))
+            .init_or_create(id.clone())
             .expect("failed to start stream");
     }
 
