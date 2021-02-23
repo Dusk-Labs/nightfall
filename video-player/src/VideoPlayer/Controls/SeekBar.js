@@ -25,8 +25,6 @@ function VideoControls() {
   const onSeek = useCallback(async (e) => {
     if (seeking) return;
 
-    console.log("[Seek] pausing video");
-
     setSeeking(true);
 
     player.pause();
@@ -38,8 +36,6 @@ function VideoControls() {
     const newSegment = Math.floor(newTime / 5);
 
     player.attachSource(`http://localhost:8000/manifest.mpd?start_num=${newSegment}`);
-
-    console.log(`[Seek] update offset to ${newTime} seconds (${newTime / 60} mins)`);
 
     setOffset(oldOffset => Math.round(oldOffset - newTime));
     setSeeking(false);

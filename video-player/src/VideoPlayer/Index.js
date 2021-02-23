@@ -15,7 +15,7 @@ function VideoPlayer() {
   const [canPlay, setCanPlay] = useState(false);
 
   const [buffer, setBuffer] = useState(true);
-  const [paused, setPaused] = useState(true);
+  const [paused, setPaused] = useState(false);
   const [offset, setOffset] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -33,13 +33,12 @@ function VideoPlayer() {
     setManifestLoaded(false);
     setManifestLoading(true);
 
-    console.log("FETCHING")
     const url = "http://localhost:8000/manifest.mpd";
     const player = MediaPlayer().create();
 
-    player.initialize(video.current, url, false);
+    player.initialize(video.current, url, true);
 
-    player.setInitialMediaSettingsFor("video", {bufferToKeep: 30})
+    player.setInitialMediaSettingsFor("video")
 
     player.updateSettings({
       "debug": {
@@ -51,24 +50,20 @@ function VideoPlayer() {
   }, []);
 
   const eManifestLoad = useCallback(() => {
-    console.log("[Video] manifest loaded");
     setManifestLoading(false);
     setManifestLoaded(true);
   }, []);
 
   const eCanPlay = useCallback(() => {
-    console.log("[Video] can play");
     setDuration(Math.round(player.duration()) | 0);
     setCanPlay(true);
   }, [player]);
 
   const ePlayBackPaused = useCallback(() => {
-    console.log("[Video] paused");
     setPaused(true);
   }, []);
 
   const ePlayBackPlaying = useCallback(() => {
-    console.log("[Video] playing");
     setPaused(false);
   }, []);
 
@@ -77,7 +72,7 @@ function VideoPlayer() {
   }, [player]);
 
   const ePlayBackWaiting = useCallback((e) => {
-    console.log("[Video] waiting", e);
+    // console.log("[Video] waiting", e);
   }, []);
 
   const ePlayBackTimeUpdated = useCallback((e) => {
