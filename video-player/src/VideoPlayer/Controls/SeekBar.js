@@ -16,17 +16,18 @@ function VideoControls() {
   }, [currentTime, duration, offset])
 
   useEffect(() => {
+    const time = (currentTime / duration) * 100;
     const position = (buffer / duration) * 100;
     const offsetPosition = (offset / duration) * 100;
+
     bufferBar.current.style.left = `${offsetPosition}%`;
-    bufferBar.current.style.width = `${position}%`;
-  }, [buffer, duration, offset])
+    bufferBar.current.style.width = `${time + position}%`;
+  }, [buffer, currentTime, duration, offset])
 
   const onSeek = useCallback(async (e) => {
     if (seeking) return;
 
     setSeeking(true);
-
     player.pause();
 
     const rect = e.target.getBoundingClientRect();
