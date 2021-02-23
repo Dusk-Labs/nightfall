@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MediaPlayer } from "dashjs";
-import VideoControls from "./VideoControls";
+import VideoControls from "./Controls/Index";
 import { VideoPlayerContext } from "./Context";
+import Load from "../Load";
+import EndsAt from "./EndsAt";
 
 import "./Index.scss";
 
@@ -102,7 +104,6 @@ function VideoPlayer() {
     }
   }, [eCanPlay, eManifestLoad, ePlayBackPaused, ePlayBackPlaying, ePlayBackProgress, ePlayBackTimeUpdated, ePlayBackWaiting, player])
 
-
   const initialValue = {
     player,
     id,
@@ -123,12 +124,17 @@ function VideoPlayer() {
       <div className="videoPlayer">
         <video
           ref={video}
-          height="540"
-          width="960"
         />
-        {manifestLoading && <p>Loading manifest</p>}
-        {manifestLoaded && !canPlay && <p>Loading video</p>}
-        {canPlay && <VideoControls/>}
+        <div className="overlay">
+          {(manifestLoading || !canPlay) && <Load/>}
+          {(manifestLoaded && canPlay) && (
+            <>
+              <div className="cover"/>
+              <VideoControls/>
+              <EndsAt/>
+            </>
+          )}
+        </div>
       </div>
     </VideoPlayerContext.Provider>
   );

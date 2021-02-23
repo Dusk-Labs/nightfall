@@ -1,0 +1,28 @@
+.videoControls {
+  grid-area: controls;
+  align-self: flex-end;
+  display: grid;
+  gap: 1em;
+  margin: 0 auto;
+  max-width: 1080px;
+  width: 100%;
+  grid-template-columns: 1fr 1fr;
+  grid-template-areas:
+    "name time"
+    "seekbar seekbar"
+    "actions actions";
+
+  .name {
+    grid-area: name;
+  }
+
+  .time {
+    justify-self: flex-end;
+    grid-area: time;
+  }
+
+  .actions {
+    justify-self: center;
+    grid-area: actions;
+  }
+}

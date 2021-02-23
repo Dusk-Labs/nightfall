@@ -13,12 +13,15 @@ function VideoControls() {
   useEffect(() => {
     const position = (currentTime / duration) * 100;
     seekBarCurrent.current.style.width = `${position}%`;
+    console.log("SEEK", position);
   }, [currentTime, duration, offset])
 
   useEffect(() => {
     const time = (currentTime / duration) * 100;
     const position = (buffer / duration) * 100;
     const offsetPosition = (offset / duration) * 100;
+
+    console.log("BUFFER", time + position);
 
     bufferBar.current.style.left = `${offsetPosition}%`;
     bufferBar.current.style.width = `${time + position}%`;
