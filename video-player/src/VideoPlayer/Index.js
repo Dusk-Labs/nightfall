@@ -42,7 +42,7 @@ function VideoPlayer() {
 
     player.updateSettings({
       "debug": {
-          "logLevel": Debug.LOG_LEVEL_INFO
+          "logLevel": Debug.LOG_LEVEL_DEBUG
       }
     });
 
