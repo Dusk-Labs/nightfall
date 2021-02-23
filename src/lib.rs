@@ -152,6 +152,10 @@ impl StateManager {
             let session = sessions.get(&session_id).unwrap();
 
             let item = rx.next_if(|op| {
+                if session.paused.load(SeqCst) {
+                    session.cont();
+                }
+
                 if let OpCode::ChunkRequest { chunk, .. } = op {
                     return session.is_chunk_done(*chunk);
                 } else if let OpCode::ChunkInitRequest { .. } = op {
