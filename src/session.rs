@@ -53,13 +53,13 @@ pub struct Session {
     ffmpeg_bin: String,
     process: AtomicCell<Option<StoppableHandle<()>>>,
 
-    has_started: bool,
+    has_started: AtomicBool,
     pub paused: AtomicBool,
-    pub start_number: u64,
+    pub start_number: AtomicU64,
     stream_type: StreamType,
     last_chunk: AtomicU64,
 
-    child_pid: Option<u32>,
+    child_pid: AtomicCell<Option<u32>>,
 
     #[cfg(feature = "fs_events")]
     fs_watcher: AtomicCell<Option<Inotify>>,
@@ -91,15 +91,15 @@ impl Session {
         Self {
             id,
             outdir,
-            start_number,
             profile,
             ffmpeg_bin,
             stream_type,
+            start_number: AtomicU64::new(start_number),
             last_chunk: AtomicU64::new(0),
             process: AtomicCell::new(None),
             paused: AtomicBool::new(false),
-            has_started: false,
-            child_pid: None,
+            has_started: AtomicBool::new(false),
+            child_pid: AtomicCell::new(None),
             file,
 
             #[cfg(feature = "fs_events")]
@@ -109,9 +109,9 @@ impl Session {
         }
     }
 
-    pub fn start(&mut self) -> Result<(), io::Error> {
+    pub fn start(&self) -> Result<(), io::Error> {
         // make sure we actually have a path to write files to.
-        self.has_started = true;
+        self.has_started.store(true, SeqCst);
         self.paused.store(false, SeqCst);
         let _ = fs::create_dir_all(self.outdir.clone());
         let args = self.build_args();
@@ -122,15 +122,20 @@ impl Session {
             .args(args.as_slice())
             .spawn()?;
 
-        self.child_pid = Some(process.id());
+        self.child_pid.store(Some(process.id()));
 
         let mut process = TranscodeHandler::new(self.id.clone(), process);
 
-        self.process = AtomicCell::new(Some(stoppable_thread::spawn(move |signal| {
-            process.handle(signal)
-        })));
+        self.process
+            .store(Some(stoppable_thread::spawn(move |signal| {
+                process.handle(signal)
+            })));
 
         Ok(())
+    }
+
+    pub fn start_num(&self) -> u64 {
+        self.start_number.load(SeqCst)
     }
 
     // FIXME: This entire subroutine will silently break streams that have non-standard sepcifications,
@@ -138,7 +143,7 @@ impl Session {
     fn build_args(&self) -> Vec<&str> {
         let mut args = vec![
             "-ss",
-            string_to_static_str((self.start_number * CHUNK_SIZE).to_string()),
+            string_to_static_str((self.start_num() * CHUNK_SIZE).to_string()),
             "-i",
             self.file.as_str(),
         ];
@@ -169,14 +174,14 @@ impl Session {
             "-f",
             "hls",
             "-start_number",
-            string_to_static_str(self.start_number.to_string()),
+            string_to_static_str(self.start_num().to_string()),
         ]);
 
         args.append(&mut vec![
             "-hls_time",
             string_to_static_str(CHUNK_SIZE.to_string()),
             "-initial_offset",
-            string_to_static_str((self.start_number * CHUNK_SIZE).to_string()),
+            string_to_static_str((self.start_num() * CHUNK_SIZE).to_string()),
             "-reset_timestamps",
             "1",
             "-force_key_frames",
@@ -204,14 +209,14 @@ impl Session {
     }
 
     pub fn pause(&self) {
-        if let Some(x) = self.child_pid {
+        if let Some(x) = self.child_pid.load() {
             crate::utils::pause_proc(x as i32);
             self.paused.store(true, SeqCst);
         }
     }
 
     pub fn cont(&self) {
-        if let Some(x) = self.child_pid {
+        if let Some(x) = self.child_pid.load() {
             crate::utils::cont_proc(x as i32);
             self.paused.store(false, SeqCst);
         }
@@ -240,7 +245,7 @@ impl Session {
 
         match self.stream_type {
             StreamType::Audio => (frame / (CHUNK_SIZE * 24)).max(self.last_chunk.load(SeqCst)),
-            StreamType::Video => frame / (CHUNK_SIZE * 24) + self.start_number,
+            StreamType::Video => frame / (CHUNK_SIZE * 24) + self.start_num(),
         }
     }
 
@@ -280,7 +285,7 @@ impl Session {
                 self.poll_events();
                 self.check_inotify(&format!("{}.m4s", chunk_num), EventMask::CLOSE_WRITE)
             } else {
-                chunk_num >= self.start_number && (self.current_chunk() > 5 && self.current_chunk() - 5 >= chunk_num)
+                chunk_num >= self.start_num() && (self.current_chunk() > 5 && self.current_chunk() - 5 >= chunk_num)
             }
         }
     }
@@ -341,51 +346,16 @@ impl Session {
     }
 
     pub fn has_started(&self) -> bool {
-        self.has_started
+        self.has_started.load(SeqCst)
     }
 
-    pub fn to_new(&self) -> Self {
-        Self {
-            id: self.id.clone(),
-            file: self.file.clone(),
-            profile: self.profile,
-            outdir: self.outdir.clone(),
-            ffmpeg_bin: self.ffmpeg_bin.clone(),
-            process: AtomicCell::new(None),
-            start_number: self.start_number,
-            stream_type: self.stream_type,
-            last_chunk: AtomicU64::new(self.last_chunk.load(SeqCst)),
-            has_started: false,
-            paused: AtomicBool::new(true),
-            child_pid: None,
-
-            #[cfg(feature = "fs_events")]
-            fs_watcher: AtomicCell::new(self.fs_watcher.take()),
-            #[cfg(feature = "fs_events")]
-            fs_events: self.fs_events.clone(),
-        }
-    }
-
-    pub fn to_new_with_chunk(&self, chunk: u64) -> Self {
-        Self {
-            id: self.id.clone(),
-            file: self.file.clone(),
-            profile: self.profile,
-            outdir: self.outdir.clone(),
-            ffmpeg_bin: self.ffmpeg_bin.clone(),
-            process: AtomicCell::new(None),
-            start_number: chunk,
-            stream_type: self.stream_type,
-            last_chunk: AtomicU64::new(chunk),
-            has_started: false,
-            paused: AtomicBool::new(true),
-            child_pid: None,
-
-            #[cfg(feature = "fs_events")]
-            fs_watcher: AtomicCell::new(self.fs_watcher.take()),
-            #[cfg(feature = "fs_events")]
-            fs_events: self.fs_events.clone(),
-        }
+    pub fn reset_to(&self, chunk: u64) {
+        self.start_number.store(chunk, SeqCst);
+        self.process.take();
+        self.last_chunk.store(chunk, SeqCst);
+        self.has_started.store(false, SeqCst);
+        self.paused.store(true, SeqCst);
+        self.child_pid.take();
     }
 }
 
@@ -448,7 +418,12 @@ impl TranscodeHandler {
                 Ok(None) => {}
                 Err(x) => println!("handle_stdout got err on try_wait(): {:?}", x),
             }
+
+            // sleep is necessary to avoid a deadlock.
+            std::thread::sleep(Duration::from_millis(50));
         }
+
+        println!("Broken out of stdout loop, killing ffmpeg");
 
         let _ = self.process.kill();
         let _ = self.process.wait();
