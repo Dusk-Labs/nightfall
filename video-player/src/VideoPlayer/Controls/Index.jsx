@@ -3,6 +3,8 @@ import { VideoPlayerContext } from "../Context";
 import SeekBar from "./SeekBar";
 
 import PlayIcon from "../../assets/Icons/Play";
+import PauseIcon from "../../assets/Icons/Pause";
+
 import "./Index.scss";
 
 function VideoControls() {
@@ -30,6 +32,11 @@ function VideoControls() {
         {paused && (
           <button onClick={play}>
             <PlayIcon/>
+          </button>
+        )}
+        {!paused && (
+          <button onClick={pause}>
+            <PauseIcon/>
           </button>
         )}
       </div>
