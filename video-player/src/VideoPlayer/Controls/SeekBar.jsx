@@ -10,22 +10,17 @@ function VideoControls() {
   const seekBarCurrent = useRef(null);
   const bufferBar = useRef(null);
 
+  // current time
   useEffect(() => {
     const position = (currentTime / duration) * 100;
     seekBarCurrent.current.style.width = `${position}%`;
-    console.log("SEEK", position);
-  }, [currentTime, duration, offset])
+  }, [currentTime, duration])
 
+  // buffer
   useEffect(() => {
-    const time = (currentTime / duration) * 100;
-    const position = (buffer / duration) * 100;
-    const offsetPosition = (offset / duration) * 100;
-
-    console.log("BUFFER", time + position);
-
-    bufferBar.current.style.left = `${offsetPosition}%`;
-    bufferBar.current.style.width = `${time + position}%`;
-  }, [buffer, currentTime, duration, offset])
+    const position = ((currentTime + buffer) / duration) * 100;
+    bufferBar.current.style.width = `${position}%`;
+  }, [buffer, currentTime, duration])
 
   const onSeek = useCallback(async (e) => {
     if (seeking) return;
