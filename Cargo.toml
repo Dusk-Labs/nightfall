@@ -11,7 +11,7 @@ default = []
 fs_events = ["inotify"]
 
 [dependencies]
-dashmap = "=4.0.0-rc6"
+dashmap = "=4.0.2"
 uuid = { version = "0.8.1", features = ["v4"] }
 stoppable_thread = "0.2.1"
 lazy_static = "1.4.0"

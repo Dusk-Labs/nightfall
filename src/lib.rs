@@ -142,6 +142,7 @@ impl StateManager {
 
     fn session_monitor(
         session_id: String,
+        tx: Sender<OpCode>,
         rx: Receiver<OpCode>,
         sessions: Arc<DashMap<String, Session>>,
     ) {
@@ -151,19 +152,68 @@ impl StateManager {
             // peek whether the next item is ready
             let session = sessions.get(&session_id).unwrap();
 
-            let item = rx.next_if(|op| {
+            // check the eta of the next chunk
+            if let Some(OpCode::ChunkRequest { chunk, .. }) = rx.peek() {
+                // if the chunk being requested is less than the starting chunk of this session we
+                // want to hard seek.
+                if *chunk < session.start_num() {
+                    println!(
+                        "CR {}/{} hard seek because {} < {}",
+                        session_id,
+                        chunk,
+                        chunk,
+                        session.start_num()
+                    );
+
+                    session.join();
+                    session.reset_to(*chunk);
+                    session.start();
+                }
+
+                // if we get here, and the session is paused we need to start it again.
                 if session.paused.load(SeqCst) {
                     session.cont();
                 }
 
-                if let OpCode::ChunkRequest { chunk, .. } = op {
-                    return session.is_chunk_done(*chunk);
-                } else if let OpCode::ChunkInitRequest { .. } = op {
-                    return session.is_chunk_done(session.start_number);
-                }
+                let eta = session.eta_for(*chunk).as_millis() as f64;
+                let eta_tol = (10_000.0 / session.raw_speed()).max(8_000.0);
 
-                true
-            });
+                // we tolerate a max eta of (10 / raw_speed).
+                // if speed is 1.0x then eta will be 10s.
+                if eta > eta_tol {
+                    println!(
+                        "CR {}/{} hard seek because eta {} is higher than the max tolerance eta {}",
+                        session_id, chunk, eta, eta_tol
+                    );
+                    session.join();
+                    session.reset_to(*chunk);
+                    session.start();
+                }
+            }
+
+            let mut item = rx.next();
+
+            if item.is_some() && session.paused.load(SeqCst) {
+                session.cont();
+            }
+
+            if let Some(OpCode::ChunkRequest { ref chunk, .. }) = item {
+                if !session.is_chunk_done(*chunk) {
+                    println!(
+                        "CR {}/{} eta @ {}",
+                        session_id,
+                        chunk,
+                        session.eta_for(*chunk).as_millis()
+                    );
+                    tx.send(item.take().unwrap());
+                }
+            }
+
+            if let Some(OpCode::ChunkInitRequest { .. }) = item {
+                if !session.is_chunk_done(session.start_num()) {
+                    tx.send(item.take().unwrap());
+                }
+            }
 
             if let Some(OpCode::ChunkRequest { chunk, chan }) = item {
                 let chunk_path = session.chunk_to_path(chunk);
@@ -173,7 +223,7 @@ impl StateManager {
             }
 
             if let Some(OpCode::ChunkInitRequest { chan }) = item {
-                let chunk_path = session.chunk_to_path(session.start_number);
+                let chunk_path = session.chunk_to_path(session.start_num());
                 chan.send(Ok(chunk_path));
                 continue;
             }
@@ -187,7 +237,7 @@ impl StateManager {
                 // if we are seeking backwards we always want to restart the stream
                 // This is because our init.mp4 gets overwritten if we seeked forward at some point
                 // Furthermore we want to hard seek anyway if the player is browser based.
-                if chunk < session.start_number {
+                if chunk < session.start_num() {
                     chan.send(Ok(true));
                     continue;
                 }
@@ -196,40 +246,6 @@ impl StateManager {
                     > (10_000.0 / session.raw_speed()).max(5_000.0)));
 
                 continue;
-            }
-
-            // check the eta of the next chunk
-            if let Some(OpCode::ChunkRequest { chunk, .. }) = rx.peek() {
-                // if the chunk being requested is less than the starting chunk of this session we
-                // want to hard seek.
-                if *chunk < session.start_number {
-                    sessions.update(&session_id, |_, v| {
-                        v.join();
-
-                        let mut new_session = v.to_new_with_chunk(*chunk);
-                        new_session.start();
-                        new_session
-                    });
-                }
-
-                // if we get here, and the session is paused we need to start it again.
-                if session.paused.load(SeqCst) {
-                    session.cont();
-                }
-
-                // we tolerate a max eta of (10 / raw_speed).
-                // if speed is 1.0x then eta will be 10s.
-                if session.eta_for(*chunk).as_millis() as f64
-                    > (10_000.0 / session.raw_speed()).max(5_000.0)
-                {
-                    sessions.update(&session_id, |_, v| {
-                        v.join();
-
-                        let mut new_session = v.to_new_with_chunk(*chunk);
-                        new_session.start();
-                        new_session
-                    });
-                }
             }
 
             // if we get here that means the chunk isnt done yet, so we sleep for a bit.
@@ -261,11 +277,12 @@ impl StateManager {
         let (session_tx, session_rx) = unbounded();
         let sessions = self.sessions.clone();
         let session_id_clone = session_id.clone();
+        let session_tx_clone = session_tx.clone();
         self.session_monitors
             .write()
             .unwrap()
             .push(thread::spawn(move || {
-                Self::session_monitor(session_id_clone, session_rx, sessions);
+                Self::session_monitor(session_id_clone, session_tx_clone, session_rx, sessions);
             }));
 
         // insert the tx channel into our map
@@ -273,11 +290,9 @@ impl StateManager {
             .insert(session_id.clone(), session_tx.clone());
 
         // start transcoding
-        self.sessions.update(&session_id, |_, v| {
-            let mut v = v.to_new();
-            v.start();
-            v
-        });
+        if let Some(x) = self.sessions.get(&session_id) {
+            x.start();
+        }
 
         session_tx
     }
