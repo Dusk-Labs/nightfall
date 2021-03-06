@@ -56,7 +56,6 @@ fn get_manifest(
     let audio = AUDIO_UUID
         .get_or_init(|| state.create(DEMO_FILE.into(), Profile::Audio, StreamType::Audio));
 
-    /*
     let formatted = format!(
         include_str!("./manifest.mpd"),
         duration_string,
@@ -69,17 +68,17 @@ fn get_manifest(
         audio,
         start_num.unwrap_or(0)
     );
-    */
+    /*
 
     let formatted = format!(
         include_str!("./manifest.mpd"),
         duration_string,
         duration_string,
-        info.get_bitrate(),
-        video,
-        video,
+        audio,
+        audio,
         start_num.unwrap_or(0)
     );
+    */
 
     Response::build()
         .header(ContentType::new("application", "dash+xml"))
