@@ -3,7 +3,6 @@ import { MediaPlayer } from "dashjs";
 import VideoControls from "./Controls/Index";
 import { VideoPlayerContext } from "./Context";
 import Load from "../Load";
-import EndsAt from "./EndsAt";
 
 import "./Index.scss";
 
@@ -127,13 +126,7 @@ function VideoPlayer() {
         />
         <div className="overlay">
           {(manifestLoading || !canPlay) && <Load/>}
-          {(manifestLoaded && canPlay) && (
-            <>
-              <div className="cover"/>
-              <VideoControls/>
-              <EndsAt/>
-            </>
-          )}
+          {(manifestLoaded && canPlay) && <VideoControls/>}
         </div>
       </div>
     </VideoPlayerContext.Provider>
