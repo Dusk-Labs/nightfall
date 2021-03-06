@@ -2,6 +2,7 @@ import { useCallback, useContext } from "react";
 import { VideoPlayerContext } from "../Context";
 import SeekBar from "./SeekBar";
 
+import PlayIcon from "../../assets/Icons/Play";
 import "./Index.scss";
 
 function VideoControls() {
@@ -26,10 +27,11 @@ function VideoControls() {
       <p className="time">{format(currentTime)} - {format(duration)}</p>
       <SeekBar/>
       <div className="actions">
-        {paused
-          ? <button onClick={play}>Play</button>
-          : <button onClick={pause}>Pause</button>
-        }
+        {paused && (
+          <button onClick={play}>
+            <PlayIcon/>
+          </button>
+        )}
       </div>
     </div>
   );
