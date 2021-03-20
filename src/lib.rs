@@ -55,6 +55,7 @@ use crate::error::*;
 use crate::profile::*;
 use crate::session::Session;
 
+use std::collections::HashMap;
 use std::sync::atomic::Ordering::SeqCst;
 use std::sync::Arc;
 use std::sync::RwLock;
@@ -66,6 +67,8 @@ use crossbeam::channel::Receiver;
 use crossbeam::channel::Sender;
 
 use dashmap::DashMap;
+
+pub type FfmpegSessionStats = Arc<RwLock<HashMap<String, HashMap<String, String>>>>;
 
 /// Represents a operation that a route can dispatch to the state manager.
 pub enum OpCode {
@@ -113,10 +116,17 @@ pub struct StateManager {
     session_monitors: Arc<RwLock<Vec<JoinHandle<()>>>>,
     /// Cleaner thread reaps sessions that have time outed.
     cleaner: Arc<JoinHandle<()>>,
+    /// FFMPEG session stats that we can poll
+    session_stats: FfmpegSessionStats,
 }
 
 impl StateManager {
-    pub fn new(outdir: String, ffmpeg_bin: String, ffprobe_bin: String) -> Self {
+    pub fn new(
+        outdir: String,
+        ffmpeg_bin: String,
+        ffprobe_bin: String,
+        session_stats: FfmpegSessionStats,
+    ) -> Self {
         let sessions = Arc::new(DashMap::new());
         let map_clone = Arc::clone(&sessions);
 
@@ -125,6 +135,7 @@ impl StateManager {
             sessions,
             ffmpeg_bin,
             ffprobe_bin,
+            session_stats,
 
             chunk_requester: Arc::new(DashMap::new()),
             session_monitors: Arc::new(RwLock::new(Vec::new())),
@@ -199,12 +210,14 @@ impl StateManager {
 
             if let Some(OpCode::ChunkRequest { ref chunk, .. }) = item {
                 if !session.is_chunk_done(*chunk) {
+                    /*
                     println!(
                         "CR {}/{} eta @ {}",
                         session_id,
                         chunk,
                         session.eta_for(*chunk).as_millis()
                     );
+                    */
                     tx.send(item.take().unwrap());
                 }
             }

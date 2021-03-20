@@ -61,6 +61,7 @@ pub struct Session {
     last_chunk: AtomicU64,
 
     child_pid: AtomicCell<Option<u32>>,
+    real_process: Arc<AtomicCell<Option<Child>>>,
 
     #[cfg(feature = "fs_events")]
     fs_watcher: AtomicCell<Option<Inotify>>,
@@ -101,6 +102,7 @@ impl Session {
             paused: AtomicBool::new(false),
             has_started: AtomicBool::new(false),
             child_pid: AtomicCell::new(None),
+            real_process: Arc::new(AtomicCell::new(None)),
             file,
 
             #[cfg(feature = "fs_events")]
@@ -117,15 +119,20 @@ impl Session {
         let _ = fs::create_dir_all(self.outdir.clone());
         let args = self.build_args();
 
-        let process = Command::new(self.ffmpeg_bin.clone())
+        let mut process = Command::new(self.ffmpeg_bin.clone())
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
+            .stderr(Stdio::piped())
             .args(args.as_slice())
             .spawn()?;
 
         self.child_pid.store(Some(process.id()));
 
-        let mut process = TranscodeHandler::new(self.id.clone(), process);
+        let stdout = process.stdout.take().unwrap();
+
+        self.real_process.store(Some(process));
+
+        let process =
+            TranscodeHandler::new(self.id.clone(), stdout, Arc::clone(&self.real_process));
 
         self.process
             .store(Some(stoppable_thread::spawn(move |signal| {
@@ -219,6 +226,9 @@ impl Session {
     }
 
     pub fn join(&self) {
+        if let Some(mut x) = self.real_process.take() {
+            x.kill();
+        }
         if let Some(x) = self.process.take() {
             x.stop().join();
         }
@@ -301,7 +311,7 @@ impl Session {
                 self.poll_events();
                 self.check_inotify(&format!("{}.m4s", chunk_num), EventMask::CLOSE_WRITE)
             } else {
-                dbg!(Path::new(&format!("{}/{}.m4s", &self.outdir, chunk_num)).is_file())
+                Path::new(&format!("{}/{}.m4s", &self.outdir, chunk_num)).is_file()
             }
         }
     }
@@ -385,33 +395,30 @@ impl fmt::Debug for Session {
     }
 }
 
+use std::process::ChildStdout;
+
 struct TranscodeHandler {
     id: String,
-    process: Child,
+    process_stdout: ChildStdout,
+    process: Arc<AtomicCell<Option<Child>>>,
 }
 
 impl TranscodeHandler {
-    fn new(id: String, process: Child) -> Self {
-        Self { id, process }
+    fn new(
+        id: String,
+        process_stdout: ChildStdout,
+        process: Arc<AtomicCell<Option<Child>>>,
+    ) -> Self {
+        Self {
+            id,
+            process_stdout,
+            process,
+        }
     }
 
-    fn handle(&mut self, signal: &SimpleAtomicBool) {
-        let stdio = BufReader::new(self.process.stdout.take().unwrap());
+    fn handle(mut self, signal: &SimpleAtomicBool) {
+        let stdio = BufReader::new(self.process_stdout);
         let mut map: HashMap<String, String> = HashMap::new();
-
-        /*
-            map.insert("frame".into(), "0".into());
-            map.insert("fps".into(), "0.0".into());
-            map.insert("stream_0_0_q".into(), "0.0".into());
-            map.insert("bitrate".into(), "0.0kbits/s".into());
-            map.insert("total_size".into(), "0".into());
-            map.insert("out_time_ms".into(), "0".into());
-            map.insert("out_time".into(), "00:00:00.000000".into());
-            map.insert("dup_frames".into(), "0".into());
-            map.insert("drop_frames".into(), "0".into());
-            map.insert("speed".into(), "0.00x".into());
-            map.insert("progress".into(), "continue".into());
-        */
 
         let mut stdio_b = stdio.lines().peekable();
 
@@ -429,20 +436,15 @@ impl TranscodeHandler {
                 }
             }
 
-            match self.process.try_wait() {
-                Ok(Some(_)) => break 'stdout,
-                Ok(None) => {}
-                Err(x) => println!("handle_stdout got err on try_wait(): {:?}", x),
+            if unsafe { &*self.process.as_ptr() }.is_none() {
+                break 'stdout;
             }
 
             // sleep is necessary to avoid a deadlock.
-            std::thread::sleep(Duration::from_millis(50));
+            std::thread::sleep(Duration::from_millis(100));
         }
 
         println!("Broken out of stdout loop, killing ffmpeg");
-
-        let _ = self.process.kill();
-        let _ = self.process.wait();
 
         let mut lock = STREAMING_SESSION.write().unwrap();
         let _ = lock.remove(&self.id);
