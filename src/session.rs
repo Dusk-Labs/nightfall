@@ -8,6 +8,7 @@ use std::io;
 
 use std::io::BufRead;
 use std::io::BufReader;
+use std::path::Path;
 use std::process::Child;
 use std::process::Command;
 use std::process::Stdio;
@@ -118,7 +119,7 @@ impl Session {
 
         let process = Command::new(self.ffmpeg_bin.clone())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            .stderr(Stdio::inherit())
             .args(args.as_slice())
             .spawn()?;
 
@@ -159,13 +160,14 @@ impl Session {
                 args.append(&mut vec!["-copyts", "-map", "0:0"]);
                 args.append(&mut self.profile.to_params().0);
             }
+            StreamType::Muxed => {
+                args.append(&mut vec!["-copyts"]);
+                args.append(&mut self.profile.to_params().0);
+                args.append(&mut vec![
+                    "-c:a", "copy", "-ac", "2", "-ab", "0", "-threads", "1",
+                ]);
+            }
         }
-
-        // args needed for strict keyframing so that video.js plays nicely
-        args.append(&mut vec![
-            "-x264-params",
-            "keyint=120:min-keyint=120;no-scenecut=1",
-        ]);
 
         // args needed to decrease the chances of a race condition when fetching a segment
         args.append(&mut vec!["-flush_packets", "1"]);
@@ -175,6 +177,20 @@ impl Session {
             "hls",
             "-start_number",
             string_to_static_str(self.start_num().to_string()),
+        ]);
+
+        // needed so that in progress segments are named `tmp` and then renamed after the data is
+        // on disk.
+        // This in theory practically prevents the web server from returning a segment that is
+        // in progress.
+        args.append(&mut vec!["-hls_flags", "temp_file"]);
+
+        // args needed so we can distinguish between init fragments for new streams.
+        // Basically on the web seeking works by reloading the entire video because of
+        // discontinuity issues that browsers seem to not ignore like mpv.
+        args.append(&mut vec![
+            "-hls_fmp4_init_filename",
+            string_to_static_str(format!("{}_init.mp4", self.start_num())),
         ]);
 
         args.append(&mut vec![
@@ -189,7 +205,7 @@ impl Session {
         ]);
 
         args.append(&mut vec!["-hls_segment_type", "1"]);
-        args.append(&mut vec!["-loglevel", "error", "-progress", "pipe:1"]);
+        args.append(&mut vec!["-loglevel", "info", "-progress", "pipe:1"]);
         args.append(&mut vec![
             "-hls_segment_filename",
             string_to_static_str(format!("{}/%d.m4s", self.outdir)),
@@ -237,7 +253,7 @@ impl Session {
                     / 1000
                     * 24
             }
-            StreamType::Video => self
+            StreamType::Video | StreamType::Muxed => self
                 .get_key("frame")
                 .map(|x| x.parse::<u64>().unwrap_or(0))
                 .unwrap_or(0),
@@ -245,7 +261,7 @@ impl Session {
 
         match self.stream_type {
             StreamType::Audio => (frame / (CHUNK_SIZE * 24)).max(self.last_chunk.load(SeqCst)),
-            StreamType::Video => frame / (CHUNK_SIZE * 24) + self.start_num(),
+            StreamType::Video | StreamType::Muxed => frame / (CHUNK_SIZE * 24) + self.start_num(),
         }
     }
 
@@ -285,7 +301,7 @@ impl Session {
                 self.poll_events();
                 self.check_inotify(&format!("{}.m4s", chunk_num), EventMask::CLOSE_WRITE)
             } else {
-                chunk_num >= self.start_num() && (self.current_chunk() > 5 && self.current_chunk() - 5 >= chunk_num)
+                dbg!(Path::new(&format!("{}/{}.m4s", &self.outdir, chunk_num)).is_file())
             }
         }
     }
@@ -342,7 +358,7 @@ impl Session {
     }
 
     pub fn init_seg(&self) -> String {
-        format!("{}/init.mp4", self.outdir)
+        format!("{}/{}_init.mp4", self.outdir, self.start_num())
     }
 
     pub fn has_started(&self) -> bool {

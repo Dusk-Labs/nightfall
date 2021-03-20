@@ -11,11 +11,14 @@ use rocket::{
     http::Status,
     response::{NamedFile, Response},
 };
+
 use std::io::Cursor;
 use std::lazy::SyncOnceCell;
 use std::path::Path;
 use std::path::PathBuf;
 use std::time::Duration;
+
+use std::ffi::OsStr;
 
 const DEMO_FILE: &str = "/home/hinach4n/media/media1/movies/John.Wick.Chapter.3.Parabellum.2019.1080p.AMZN.WEBRip.DD5.1.x264-FGT/John.Wick.Chapter.3.Parabellum.2019.1080p.AMZN.WEBRip.DD5.1.x264-FGT.mkv";
 static VIDEO_UUID: SyncOnceCell<String> = SyncOnceCell::new();
@@ -35,6 +38,8 @@ fn get_manifest(
         .get_meta(&std::path::PathBuf::from(DEMO_FILE))
         .unwrap();
 
+    let start_num = start_num.unwrap_or(0);
+
     let mut ms = info.get_ms().unwrap().to_string();
     ms.truncate(4);
 
@@ -53,23 +58,17 @@ fn get_manifest(
 
     let video =
         VIDEO_UUID.get_or_init(|| state.create(DEMO_FILE.into(), Profile::High, StreamType::Video));
-    let audio = AUDIO_UUID
-        .get_or_init(|| state.create(DEMO_FILE.into(), Profile::Audio, StreamType::Audio));
 
     let formatted = format!(
         include_str!("./manifest.mpd"),
-        duration_string,
-        duration_string,
-        info.get_bitrate(),
-        video,
-        video,
-        start_num.unwrap_or(0),
-        audio,
-        audio,
-        start_num.unwrap_or(0)
+        duration = duration_string,
+        bandwidth = info.get_bitrate(),
+        init = format!("init/{}/{}_init.mp4", video.clone(), start_num),
+        chunk_path = format!("chunks/{}/$Number$.m4s", video.clone()),
+        start_num = start_num,
     );
-    /*
 
+    /*
     let formatted = format!(
         include_str!("./manifest.mpd"),
         duration_string,
@@ -102,8 +101,16 @@ fn is_chunk_ready(state: State<StateManager>, id: String, chunk_num: u64) -> Sta
     }
 }
 
-#[get("/chunks/<id>/init.mp4", rank = 1)]
-fn get_init(state: State<StateManager>, id: String) -> Result<Option<NamedFile>, ()> {
+#[get("/init/<id>/<init..>")]
+fn get_init(
+    state: State<StateManager>,
+    id: String,
+    init: PathBuf,
+) -> Result<Option<NamedFile>, ()> {
+    if dbg!(init.extension()) != Some(OsStr::new("mp4")) {
+        return Err(());
+    }
+
     let path = state.init_or_create(id).unwrap();
 
     Ok(NamedFile::open(path).ok())
@@ -118,7 +125,7 @@ fn get_init(state: State<StateManager>, id: String) -> Result<Option<NamedFile>,
 ///
 /// When the chunk is reported as finished, we await for a event of `CLOSE_WRITE` from inotify,
 /// then return the file to avoid a race condition.
-#[get("/chunks/<id>/<chunk..>", rank = 2)]
+#[get("/chunks/<id>/<chunk..>")]
 fn get_chunks(
     state: State<StateManager>,
     id: String,
