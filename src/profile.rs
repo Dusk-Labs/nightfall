@@ -2,6 +2,7 @@
 pub enum StreamType {
     Video,
     Audio,
+    Muxed,
 }
 
 #[derive(Clone, Copy)]
@@ -19,11 +20,11 @@ impl Profile {
             Self::Direct => (vec!["-c:0", "copy"], "direct"),
             Self::High => (
                 vec![
-                    "-c:0",
+                    "-c:v",
                     "libx264",
                     "-b:v",
                     "5M",
-                    "-preset:0",
+                    "-preset",
                     "veryfast",
                     "-vf",
                     "scale=1280:-2",
