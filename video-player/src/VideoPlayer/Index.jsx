@@ -37,13 +37,11 @@ function VideoPlayer() {
     setManifestLoading(true);
 
     const url = "http://localhost:8000/manifest.mpd";
-    const player = MediaPlayer().create();
+    const mediaPlayer = MediaPlayer().create();
 
-    player.initialize(video.current, url, true);
+    mediaPlayer.initialize(video.current, url, true);
 
-    player.setInitialMediaSettingsFor("video")
-
-    setPlayer(player);
+    setPlayer(mediaPlayer);
   }, []);
 
   const eManifestLoad = useCallback(() => {
@@ -64,10 +62,6 @@ function VideoPlayer() {
   const ePlayBackPlaying = useCallback(() => {
     setPaused(false);
   }, []);
-
-  const ePlayBackProgress = useCallback(() => {
-    setBuffer(Math.round(player.getBufferLength()));
-  }, [player]);
 
   const ePlayBackWaiting = useCallback(e => {
     setWaiting(true);
@@ -90,7 +84,12 @@ function VideoPlayer() {
   */
   const ePlayBackTimeUpdated = useCallback((e) => {
     setCurrentTime(Math.floor(offset + (e.time - oldOffset)));
-  }, [offset, oldOffset]);
+    /*
+      PLAYBACK_PROGRESS event stops after error occurs
+      so using this event from now on to get buffer length
+    */
+    setBuffer(Math.round(player.getBufferLength()));
+  }, [offset, oldOffset, player]);
 
   // video events
   useEffect(() => {
@@ -100,7 +99,6 @@ function VideoPlayer() {
     player.on(MediaPlayer.events.CAN_PLAY, eCanPlay);
     player.on(MediaPlayer.events.PLAYBACK_PAUSED, ePlayBackPaused);
     player.on(MediaPlayer.events.PLAYBACK_PLAYING, ePlayBackPlaying);
-    player.on(MediaPlayer.events.PLAYBACK_PROGRESS, ePlayBackProgress);
     player.on(MediaPlayer.events.PLAYBACK_WAITING, ePlayBackWaiting);
     player.on(MediaPlayer.events.PLAYBACK_TIME_UPDATED, ePlayBackTimeUpdated);
     player.on(MediaPlayer.events.PLAYBACK_NOT_ALLOWED, ePlayBackNotAllowed);
@@ -111,13 +109,12 @@ function VideoPlayer() {
       player.off(MediaPlayer.events.CAN_PLAY, eCanPlay);
       player.off(MediaPlayer.events.PLAYBACK_PAUSED, ePlayBackPaused);
       player.off(MediaPlayer.events.PLAYBACK_PLAYING, ePlayBackPlaying);
-      player.off(MediaPlayer.events.PLAYBACK_PROGRESS, ePlayBackProgress);
       player.off(MediaPlayer.events.PLAYBACK_WAITING, ePlayBackWaiting);
       player.off(MediaPlayer.events.PLAYBACK_TIME_UPDATED, ePlayBackTimeUpdated);
       player.off(MediaPlayer.events.PLAYBACK_NOT_ALLOWED, ePlayBackNotAllowed);
       player.off(MediaPlayer.events.ERROR, eError);
     }
-  }, [eCanPlay, eError, eManifestLoad, ePlayBackNotAllowed, ePlayBackPaused, ePlayBackPlaying, ePlayBackProgress, ePlayBackTimeUpdated, ePlayBackWaiting, player])
+  }, [eCanPlay, eError, eManifestLoad, ePlayBackNotAllowed, ePlayBackPaused, ePlayBackPlaying, ePlayBackTimeUpdated, ePlayBackWaiting, player])
 
   const initialValue = {
     player,
