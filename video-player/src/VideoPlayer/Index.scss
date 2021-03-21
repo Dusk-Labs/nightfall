@@ -4,6 +4,7 @@
   width: 100%;
   position: relative;
   overflow: hidden;
+  font-family: "Roboto Medium";
 
   video {
     height: 100%;
@@ -16,7 +17,7 @@
     padding: 2em;
     height: 100%;
     width: 100%;
-    background: #1a1a1a11;
+    background: linear-gradient(to top, #000, transparent 30%);
     top: 0;
     display: grid;
     gap: 5em;
@@ -29,15 +30,6 @@
     left: 50%;
     transform: translate(-50%, -50%);
   }
-
-  .endsAt {
-    grid-area: endsAt;
-    justify-self: flex-end;
-  }
-
-  .cover {
-    display: none;
-  }
 }
 
 @media only screen and (min-width: 1080px) {
@@ -45,16 +37,7 @@
     .overlay {
       grid-template-columns: 200px 1fr 200px;
       align-items: flex-end;
-      grid-template-areas: "cover controls endsAt";
-    }
-
-    .cover {
-      display: block;
-      grid-area: cover;
-      background: #222;
-      height: 320px;
-      width: 200px;
-      border-radius: 10px;
+      grid-template-areas: ". controls .";
     }
   }
 }
