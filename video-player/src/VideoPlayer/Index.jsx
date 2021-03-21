@@ -6,6 +6,7 @@ import Load from "../Load";
 
 import "./Index.scss";
 
+// oldOffset logic might still be useful in the future but redundant rn (seeking quite unstable)
 function VideoPlayer() {
   const video = useRef(null);
   const [player, setPlayer] = useState();
@@ -20,7 +21,7 @@ function VideoPlayer() {
   const [paused, setPaused] = useState(false);
   const [offset, setOffset] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
-  const [oldOffset, setOldOffset] = useState(0);
+  // const [oldOffset, setOldOffset] = useState(0);
   const [duration, setDuration] = useState(0);
 
   useEffect(() => {
@@ -82,14 +83,15 @@ function VideoPlayer() {
     Seeking second time to 200s results in video.time taking the old seek position starting from 100s
     OldOffset undos that and sets it back to 0s for consistency and to keep track of seekbar position accurately
   */
-  const ePlayBackTimeUpdated = useCallback((e) => {
-    setCurrentTime(Math.floor(offset + (e.time - oldOffset)));
+  const ePlayBackTimeUpdated = useCallback(e => {
+    // setCurrentTime(Math.floor(offset + (e.time - oldOffset)));
+    setCurrentTime(Math.floor(e.time));
     /*
       PLAYBACK_PROGRESS event stops after error occurs
       so using this event from now on to get buffer length
     */
     setBuffer(Math.round(player.getBufferLength()));
-  }, [offset, oldOffset, player]);
+  }, [player]);
 
   // video events
   useEffect(() => {
@@ -123,7 +125,6 @@ function VideoPlayer() {
     setCurrentTime,
     currentTime,
     duration,
-    setOldOffset,
     setPlayer,
     offset,
     setOffset,
