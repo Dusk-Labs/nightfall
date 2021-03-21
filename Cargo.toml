@@ -20,6 +20,7 @@ cfg-if = "1.0.0"
 
 [target.'cfg(unix)'.dependencies]
 nix = "0.20.0"
+psutil = "3.2.0"
 
 [target.'cfg(windows)'.dependencies]
 winapi = "*"

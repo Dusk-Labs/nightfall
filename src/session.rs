@@ -52,7 +52,7 @@ pub struct Session {
     last_chunk: AtomicU64,
 
     child_pid: AtomicCell<Option<u32>>,
-    real_process: Arc<AtomicCell<Option<Child>>>,
+    real_process: AtomicCell<Option<Child>>,
 }
 
 impl Session {
@@ -79,7 +79,7 @@ impl Session {
             paused: AtomicBool::new(false),
             has_started: AtomicBool::new(false),
             child_pid: AtomicCell::new(None),
-            real_process: Arc::new(AtomicCell::new(None)),
+            real_process: AtomicCell::new(None),
             file,
         }
     }
@@ -100,15 +100,13 @@ impl Session {
         self.child_pid.store(Some(process.id()));
 
         let stdout = process.stdout.take().unwrap();
+        let stdout_parser_thread = TranscodeHandler::new(self.id.clone(), stdout, process.id());
 
         self.real_process.store(Some(process));
 
-        let process =
-            TranscodeHandler::new(self.id.clone(), stdout, Arc::clone(&self.real_process));
-
         self.process
             .store(Some(stoppable_thread::spawn(move |signal| {
-                process.handle(signal)
+                stdout_parser_thread.handle(signal)
             })));
 
         Ok(())
@@ -200,9 +198,7 @@ impl Session {
     pub fn join(&self) {
         if let Some(mut x) = self.real_process.take() {
             x.kill();
-        }
-        if let Some(x) = self.process.take() {
-            x.stop().join();
+            x.wait();
         }
     }
 
@@ -256,13 +252,13 @@ impl Session {
 
     // returns how many chunks per second
     pub fn speed(&self) -> f64 {
-        (self.raw_speed().floor().max(20.0) * 24.0) / (CHUNK_SIZE as f64 * 24.0)
+        (dbg!(self.raw_speed()).floor().max(20.0) * 24.0) / (CHUNK_SIZE as f64 * 24.0)
     }
 
     pub fn eta_for(&self, chunk: u64) -> Duration {
-        let cps = self.speed();
+        let cps = dbg!(self.speed());
 
-        let current_chunk = self.current_chunk() as f64;
+        let current_chunk = dbg!(self.current_chunk() as f64);
         let diff = (chunk as f64 - current_chunk).abs();
 
         Duration::from_secs((diff / cps).abs().ceil() as u64)
@@ -319,31 +315,27 @@ use std::process::ChildStdout;
 struct TranscodeHandler {
     id: String,
     process_stdout: ChildStdout,
-    process: Arc<AtomicCell<Option<Child>>>,
+    pid: u32,
 }
 
 impl TranscodeHandler {
-    fn new(
-        id: String,
-        process_stdout: ChildStdout,
-        process: Arc<AtomicCell<Option<Child>>>,
-    ) -> Self {
+    fn new(id: String, process_stdout: ChildStdout, pid: u32) -> Self {
         Self {
             id,
             process_stdout,
-            process,
+            pid,
         }
     }
 
-    fn handle(mut self, signal: &SimpleAtomicBool) {
+    fn handle(self, signal: &SimpleAtomicBool) {
         let stdio = BufReader::new(self.process_stdout);
         let mut map: HashMap<String, String> = HashMap::new();
 
         let mut stdio_b = stdio.lines().peekable();
 
         'stdout: while !signal.get() {
-            if stdio_b.peek().is_some() {
-                let output = stdio_b.next().unwrap().unwrap();
+            while stdio_b.peek().is_some() {
+                let output = dbg!(stdio_b.next().unwrap().unwrap());
                 let output: Vec<&str> = output.split('=').collect();
 
                 // remove whitespace on both ends
@@ -355,11 +347,10 @@ impl TranscodeHandler {
                 }
             }
 
-            if unsafe { &*self.process.as_ptr() }.is_none() {
+            if crate::utils::is_process_effectively_dead(self.pid) {
                 break 'stdout;
             }
 
-            // sleep is necessary to avoid a deadlock.
             std::thread::sleep(Duration::from_millis(100));
         }
 
