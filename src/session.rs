@@ -23,15 +23,6 @@ use std::sync::RwLock;
 use crossbeam::atomic::AtomicCell;
 use stoppable_thread::{self, SimpleAtomicBool, StoppableHandle};
 
-cfg_if::cfg_if! {
-    if #[cfg(feature = "fs_events")] {
-        use inotify::Event;
-        use inotify::EventMask;
-        use inotify::Inotify;
-        use inotify::WatchMask;
-    }
-}
-
 /// Length of a chunk in seconds.
 const CHUNK_SIZE: u64 = 5;
 /// Represents how many chunks we encode before we require a timeout reset.
@@ -62,11 +53,6 @@ pub struct Session {
 
     child_pid: AtomicCell<Option<u32>>,
     real_process: Arc<AtomicCell<Option<Child>>>,
-
-    #[cfg(feature = "fs_events")]
-    fs_watcher: AtomicCell<Option<Inotify>>,
-    #[cfg(feature = "fs_events")]
-    fs_events: Arc<RwLock<Vec<Event<String>>>>,
 }
 
 impl Session {
@@ -80,15 +66,6 @@ impl Session {
         ffmpeg_bin: String,
     ) -> Self {
         std::fs::create_dir(&outdir).unwrap();
-
-        cfg_if::cfg_if! {
-            if #[cfg(feature = "fs_events")] {
-                let mut fs_watcher = Inotify::init().expect("Failed to init inotify");
-                fs_watcher
-                    .add_watch(&outdir, WatchMask::CLOSE_WRITE)
-                    .unwrap();
-            }
-        }
 
         Self {
             id,
@@ -104,11 +81,6 @@ impl Session {
             child_pid: AtomicCell::new(None),
             real_process: Arc::new(AtomicCell::new(None)),
             file,
-
-            #[cfg(feature = "fs_events")]
-            fs_watcher: AtomicCell::new(Some(fs_watcher)),
-            #[cfg(feature = "fs_events")]
-            fs_events: Arc::new(RwLock::new(Vec::new())),
         }
     }
 
@@ -297,62 +269,9 @@ impl Session {
     }
 
     /// Method does some math magic to guess if a chunk has been fully written by ffmpeg yet
+    /// only works when `ffmpeg` writes files to tmp then renames them.
     pub fn is_chunk_done(&self, chunk_num: u64) -> bool {
-        cfg_if::cfg_if! {
-            // if fs_events is enabled (as it should be on *nix) we use inotify to check whether a
-            // chunk has been closed by ffmpeg, thus it is ready and wont result in a race
-            // condition when returned.
-            //
-            // if fs_events isnt enabled (as it should be on windows) we estimate whether the chunk
-            // is done by checking whether current_chunk is 5 chunks ahead of the chunk requested.
-            //
-            // NOTE: This will break when seeking, and can result in unstable playback.
-            if #[cfg(feature = "fs_events")] {
-                self.poll_events();
-                self.check_inotify(&format!("{}.m4s", chunk_num), EventMask::CLOSE_WRITE)
-            } else {
-                Path::new(&format!("{}/{}.m4s", &self.outdir, chunk_num)).is_file()
-            }
-        }
-    }
-
-    #[cfg(feature = "fs_events")]
-    fn poll_events(&self) {
-        let mut buf = [0; 8192];
-        if let Some(mut fs_watcher) = self.fs_watcher.take() {
-            let mut events = fs_watcher
-                .read_events(&mut buf)
-                .unwrap()
-                .map(|x| Event {
-                    wd: x.wd,
-                    mask: x.mask,
-                    cookie: x.cookie,
-
-                    name: x.name.map(|x| x.to_str().unwrap().to_string()),
-                })
-                .collect::<Vec<_>>();
-
-            self.fs_events.write().unwrap().append(&mut events);
-            self.fs_watcher.swap(Some(fs_watcher));
-        }
-    }
-
-    #[cfg(feature = "fs_events")]
-    fn check_inotify(&self, path: &str, mask: EventMask) -> bool {
-        !self
-            .fs_events
-            .read()
-            .unwrap()
-            .iter()
-            .filter(|x| {
-                if let Some(name) = &x.name {
-                    x.mask == mask && name.as_str() == path
-                } else {
-                    false
-                }
-            })
-            .collect::<Vec<_>>()
-            .is_empty()
+        Path::new(&format!("{}/{}.m4s", &self.outdir, chunk_num)).is_file()
     }
 
     pub fn is_timeout(&self) -> bool {
