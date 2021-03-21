@@ -26,7 +26,6 @@ function VideoControls() {
     if (seeking) return;
 
     setSeeking(true);
-    player.pause();
 
     const rect = e.target.getBoundingClientRect();
     const percent = (e.clientX - rect.left) / rect.width;
@@ -40,7 +39,6 @@ function VideoControls() {
     setOffset(newTime);
     setCurrentTime(0);
     setSeeking(false);
-    player.play();
   }, [offset, player, seeking, setCurrentTime, setOffset, setOldOffset]);
 
   return (
