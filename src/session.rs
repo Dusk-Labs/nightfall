@@ -91,9 +91,20 @@ impl Session {
         let _ = fs::create_dir_all(self.outdir.clone());
         let args = self.build_args();
 
+        // FIXME(Windows): For some reason if we dont tell rust to
+        // use real stderr for ffmpeg instead of creating a new pipe
+        // ffmpeg starts but it wont execute anything, it just idles.
+        cfg_if::cfg_if! {
+            if #[cfg(unix)] {
+                let stderr = Stdio::piped();
+            } else {
+                let stderr = Stdio::inherit();
+            }
+        }
+
         let mut process = Command::new(self.ffmpeg_bin.clone())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            .stderr(stderr)
             .args(args.as_slice())
             .spawn()?;
 
@@ -120,6 +131,7 @@ impl Session {
     // such as fps that isnt 24
     fn build_args(&self) -> Vec<&str> {
         let mut args = vec![
+            "-y",
             "-ss",
             string_to_static_str((self.start_num() * CHUNK_SIZE).to_string()),
             "-i",
@@ -335,7 +347,7 @@ impl TranscodeHandler {
 
         'stdout: while !signal.get() {
             while stdio_b.peek().is_some() {
-                let output = dbg!(stdio_b.next().unwrap().unwrap());
+                let output = stdio_b.next().unwrap().unwrap();
                 let output: Vec<&str> = output.split('=').collect();
 
                 // remove whitespace on both ends

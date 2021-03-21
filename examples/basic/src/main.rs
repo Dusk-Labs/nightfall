@@ -25,12 +25,12 @@ use std::time::Duration;
 
 use std::ffi::OsStr;
 
-const DEMO_FILE: &str = "/home/hinach4n/media/media1/movies/John.Wick.Chapter.3.Parabellum.2019.1080p.AMZN.WEBRip.DD5.1.x264-FGT/John.Wick.Chapter.3.Parabellum.2019.1080p.AMZN.WEBRip.DD5.1.x264-FGT.mkv";
+const DEMO_FILE: &str = r"C:\Users\44786\Downloads\Dr.Stone.S2E06.mkv";
 static VIDEO_UUID: SyncOnceCell<String> = SyncOnceCell::new();
 static AUDIO_UUID: SyncOnceCell<String> = SyncOnceCell::new();
-const FFMPEG_BIN: &str = "/usr/bin/ffmpeg";
-const FFPROBE_BIN: &str = "/usr/bin/ffprobe";
-const CACHE_DIR: &str = "/tmp/streaming_cache";
+const FFMPEG_BIN: &str = "./ffmpeg.exe";
+const FFPROBE_BIN: &str = "./ffprobe.exe";
+const CACHE_DIR: &str = "./streaming_cache";
 
 #[get("/manifest.mpd?<start_num>")]
 fn get_manifest(
@@ -131,7 +131,14 @@ fn get_init(
         return Err(());
     }
 
-    let path = state.init_or_create(id).unwrap();
+    let first_chunk = init.file_name()
+        .and_then(|x| x.to_str())
+        .map(|x| x.split("_"))
+        .and_then(|mut x| x.next())
+        .and_then(|x| x.parse::<u64>().ok())
+        .unwrap();
+
+    let path = state.init_or_create(id, first_chunk).unwrap();
 
     Ok(NamedFile::open(path).ok())
 }
@@ -166,12 +173,13 @@ fn get_chunks(
         .parse::<u64>()
         .unwrap_or(0);
 
+    /* does this path even get reached ever lol?
     if let Err(_) = state.exists(id.clone()) {
         state
             .init_or_create(id.clone())
             .expect("failed to start stream");
     }
-
+    */
     // try to get the chunk or create one.
     let path = state.get_segment(id.clone(), chunk_num).unwrap();
 
