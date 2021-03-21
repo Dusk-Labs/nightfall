@@ -4,10 +4,6 @@ version = "0.1.0"
 authors = ["Valerian G. <valerian.garleanu@pm.me>"]
 edition = "2018"
 
-[features]
-default = []
-fs_events = ["nightfall/fs_events"]
-
 [dependencies]
 nightfall = { path = "../../" }
 rocket = "0.4.5"

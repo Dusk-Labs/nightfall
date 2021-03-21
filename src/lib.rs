@@ -55,11 +55,13 @@ use crate::error::*;
 use crate::profile::*;
 use crate::session::Session;
 
+use std::collections::HashMap;
 use std::sync::atomic::Ordering::SeqCst;
 use std::sync::Arc;
 use std::sync::RwLock;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
+use std::time::Instant;
 
 use crossbeam::channel::unbounded;
 use crossbeam::channel::Receiver;
@@ -67,7 +69,10 @@ use crossbeam::channel::Sender;
 
 use dashmap::DashMap;
 
+pub type FfmpegSessionStats = Arc<RwLock<HashMap<String, HashMap<String, String>>>>;
+
 /// Represents a operation that a route can dispatch to the state manager.
+#[derive(Debug)]
 pub enum OpCode {
     /// Represents a request for a init chunk.
     ChunkInitRequest { chan: Sender<Result<String>> },
@@ -113,10 +118,17 @@ pub struct StateManager {
     session_monitors: Arc<RwLock<Vec<JoinHandle<()>>>>,
     /// Cleaner thread reaps sessions that have time outed.
     cleaner: Arc<JoinHandle<()>>,
+    /// FFMPEG session stats that we can poll
+    session_stats: FfmpegSessionStats,
 }
 
 impl StateManager {
-    pub fn new(outdir: String, ffmpeg_bin: String, ffprobe_bin: String) -> Self {
+    pub fn new(
+        outdir: String,
+        ffmpeg_bin: String,
+        ffprobe_bin: String,
+        session_stats: FfmpegSessionStats,
+    ) -> Self {
         let sessions = Arc::new(DashMap::new());
         let map_clone = Arc::clone(&sessions);
 
@@ -125,6 +137,7 @@ impl StateManager {
             sessions,
             ffmpeg_bin,
             ffprobe_bin,
+            session_stats,
 
             chunk_requester: Arc::new(DashMap::new()),
             session_monitors: Arc::new(RwLock::new(Vec::new())),
@@ -147,13 +160,14 @@ impl StateManager {
         sessions: Arc<DashMap<String, Session>>,
     ) {
         let mut rx = rx.iter().peekable();
+        let mut last_chunk_num = 0;
+        let mut last_hard_seek = Instant::now();
 
         loop {
             // peek whether the next item is ready
             let session = sessions.get(&session_id).unwrap();
-
             // check the eta of the next chunk
-            if let Some(OpCode::ChunkRequest { chunk, .. }) = rx.peek() {
+            if let Some(OpCode::ChunkRequest { chunk, .. }) = dbg!(rx.peek()) {
                 // if the chunk being requested is less than the starting chunk of this session we
                 // want to hard seek.
                 if *chunk < session.start_num() {
@@ -168,6 +182,8 @@ impl StateManager {
                     session.join();
                     session.reset_to(*chunk);
                     session.start();
+
+                    last_hard_seek = Instant::now();
                 }
 
                 // if we get here, and the session is paused we need to start it again.
@@ -175,8 +191,24 @@ impl StateManager {
                     session.cont();
                 }
 
-                let eta = session.eta_for(*chunk).as_millis() as f64;
-                let eta_tol = (10_000.0 / session.raw_speed()).max(8_000.0);
+                // FIXME: When we hard seek and start a new ffmpeg session for some reason ffmpeg
+                // reports invalid speed but then evens out. The problem is that causes seeking
+                // multiple times in a row to be very slow.
+                // thus for like the first 10s after a hard seek we exclusively hard seek if the
+                // target is over 10 chunks into the future.
+                if *chunk > session.current_chunk() + 15
+                    && Instant::now() < last_hard_seek + Duration::from_secs(15)
+                {
+                    println!("Hard seeking because of hard seek cooldown.");
+                    session.join();
+                    session.reset_to(*chunk);
+                    session.start();
+
+                    last_hard_seek = Instant::now();
+                }
+
+                let eta = dbg!(session.eta_for(*chunk).as_millis() as f64);
+                let eta_tol = dbg!((10_000.0 / session.raw_speed()).max(8_000.0));
 
                 // we tolerate a max eta of (10 / raw_speed).
                 // if speed is 1.0x then eta will be 10s.
@@ -199,12 +231,14 @@ impl StateManager {
 
             if let Some(OpCode::ChunkRequest { ref chunk, .. }) = item {
                 if !session.is_chunk_done(*chunk) {
+                    /*
                     println!(
                         "CR {}/{} eta @ {}",
                         session_id,
                         chunk,
                         session.eta_for(*chunk).as_millis()
                     );
+                    */
                     tx.send(item.take().unwrap());
                 }
             }
@@ -219,6 +253,8 @@ impl StateManager {
                 let chunk_path = session.chunk_to_path(chunk);
                 session.reset_timeout(chunk);
                 chan.send(Ok(chunk_path));
+
+                last_chunk_num = chunk;
                 continue;
             }
 
@@ -242,6 +278,18 @@ impl StateManager {
                     continue;
                 }
 
+                // FIXME: When we hard seek and start a new ffmpeg session for some reason ffmpeg
+                // reports invalid speed but then evens out. The problem is that causes seeking
+                // multiple times in a row to be very slow.
+                // thus for like the first 10s after a hard seek we exclusively hard seek if the
+                // target is over 10 chunks into the future.
+                if chunk > session.current_chunk() + 15
+                    && Instant::now() < last_hard_seek + Duration::from_secs(15)
+                {
+                    chan.send(Ok(true));
+                    continue;
+                }
+
                 chan.send(Ok((session.eta_for(chunk).as_millis() as f64)
                     > (10_000.0 / session.raw_speed()).max(5_000.0)));
 
@@ -249,7 +297,7 @@ impl StateManager {
             }
 
             // if we get here that means the chunk isnt done yet, so we sleep for a bit.
-            thread::sleep(Duration::from_millis(100));
+            thread::sleep(Duration::from_millis(200));
         }
     }
 

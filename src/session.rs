@@ -23,15 +23,6 @@ use std::sync::RwLock;
 use crossbeam::atomic::AtomicCell;
 use stoppable_thread::{self, SimpleAtomicBool, StoppableHandle};
 
-cfg_if::cfg_if! {
-    if #[cfg(feature = "fs_events")] {
-        use inotify::Event;
-        use inotify::EventMask;
-        use inotify::Inotify;
-        use inotify::WatchMask;
-    }
-}
-
 /// Length of a chunk in seconds.
 const CHUNK_SIZE: u64 = 5;
 /// Represents how many chunks we encode before we require a timeout reset.
@@ -61,11 +52,7 @@ pub struct Session {
     last_chunk: AtomicU64,
 
     child_pid: AtomicCell<Option<u32>>,
-
-    #[cfg(feature = "fs_events")]
-    fs_watcher: AtomicCell<Option<Inotify>>,
-    #[cfg(feature = "fs_events")]
-    fs_events: Arc<RwLock<Vec<Event<String>>>>,
+    real_process: AtomicCell<Option<Child>>,
 }
 
 impl Session {
@@ -80,15 +67,6 @@ impl Session {
     ) -> Self {
         std::fs::create_dir(&outdir).unwrap();
 
-        cfg_if::cfg_if! {
-            if #[cfg(feature = "fs_events")] {
-                let mut fs_watcher = Inotify::init().expect("Failed to init inotify");
-                fs_watcher
-                    .add_watch(&outdir, WatchMask::CLOSE_WRITE)
-                    .unwrap();
-            }
-        }
-
         Self {
             id,
             outdir,
@@ -101,12 +79,8 @@ impl Session {
             paused: AtomicBool::new(false),
             has_started: AtomicBool::new(false),
             child_pid: AtomicCell::new(None),
+            real_process: AtomicCell::new(None),
             file,
-
-            #[cfg(feature = "fs_events")]
-            fs_watcher: AtomicCell::new(Some(fs_watcher)),
-            #[cfg(feature = "fs_events")]
-            fs_events: Arc::new(RwLock::new(Vec::new())),
         }
     }
 
@@ -117,19 +91,22 @@ impl Session {
         let _ = fs::create_dir_all(self.outdir.clone());
         let args = self.build_args();
 
-        let process = Command::new(self.ffmpeg_bin.clone())
+        let mut process = Command::new(self.ffmpeg_bin.clone())
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
+            .stderr(Stdio::piped())
             .args(args.as_slice())
             .spawn()?;
 
         self.child_pid.store(Some(process.id()));
 
-        let mut process = TranscodeHandler::new(self.id.clone(), process);
+        let stdout = process.stdout.take().unwrap();
+        let stdout_parser_thread = TranscodeHandler::new(self.id.clone(), stdout, process.id());
+
+        self.real_process.store(Some(process));
 
         self.process
             .store(Some(stoppable_thread::spawn(move |signal| {
-                process.handle(signal)
+                stdout_parser_thread.handle(signal)
             })));
 
         Ok(())
@@ -219,8 +196,9 @@ impl Session {
     }
 
     pub fn join(&self) {
-        if let Some(x) = self.process.take() {
-            x.stop().join();
+        if let Some(mut x) = self.real_process.take() {
+            x.kill();
+            x.wait();
         }
     }
 
@@ -274,75 +252,22 @@ impl Session {
 
     // returns how many chunks per second
     pub fn speed(&self) -> f64 {
-        (self.raw_speed().floor().max(20.0) * 24.0) / (CHUNK_SIZE as f64 * 24.0)
+        (dbg!(self.raw_speed()).floor().max(20.0) * 24.0) / (CHUNK_SIZE as f64 * 24.0)
     }
 
     pub fn eta_for(&self, chunk: u64) -> Duration {
-        let cps = self.speed();
+        let cps = dbg!(self.speed());
 
-        let current_chunk = self.current_chunk() as f64;
+        let current_chunk = dbg!(self.current_chunk() as f64);
         let diff = (chunk as f64 - current_chunk).abs();
 
         Duration::from_secs((diff / cps).abs().ceil() as u64)
     }
 
     /// Method does some math magic to guess if a chunk has been fully written by ffmpeg yet
+    /// only works when `ffmpeg` writes files to tmp then renames them.
     pub fn is_chunk_done(&self, chunk_num: u64) -> bool {
-        cfg_if::cfg_if! {
-            // if fs_events is enabled (as it should be on *nix) we use inotify to check whether a
-            // chunk has been closed by ffmpeg, thus it is ready and wont result in a race
-            // condition when returned.
-            //
-            // if fs_events isnt enabled (as it should be on windows) we estimate whether the chunk
-            // is done by checking whether current_chunk is 5 chunks ahead of the chunk requested.
-            //
-            // NOTE: This will break when seeking, and can result in unstable playback.
-            if #[cfg(feature = "fs_events")] {
-                self.poll_events();
-                self.check_inotify(&format!("{}.m4s", chunk_num), EventMask::CLOSE_WRITE)
-            } else {
-                dbg!(Path::new(&format!("{}/{}.m4s", &self.outdir, chunk_num)).is_file())
-            }
-        }
-    }
-
-    #[cfg(feature = "fs_events")]
-    fn poll_events(&self) {
-        let mut buf = [0; 8192];
-        if let Some(mut fs_watcher) = self.fs_watcher.take() {
-            let mut events = fs_watcher
-                .read_events(&mut buf)
-                .unwrap()
-                .map(|x| Event {
-                    wd: x.wd,
-                    mask: x.mask,
-                    cookie: x.cookie,
-
-                    name: x.name.map(|x| x.to_str().unwrap().to_string()),
-                })
-                .collect::<Vec<_>>();
-
-            self.fs_events.write().unwrap().append(&mut events);
-            self.fs_watcher.swap(Some(fs_watcher));
-        }
-    }
-
-    #[cfg(feature = "fs_events")]
-    fn check_inotify(&self, path: &str, mask: EventMask) -> bool {
-        !self
-            .fs_events
-            .read()
-            .unwrap()
-            .iter()
-            .filter(|x| {
-                if let Some(name) = &x.name {
-                    x.mask == mask && name.as_str() == path
-                } else {
-                    false
-                }
-            })
-            .collect::<Vec<_>>()
-            .is_empty()
+        Path::new(&format!("{}/{}.m4s", &self.outdir, chunk_num)).is_file()
     }
 
     pub fn is_timeout(&self) -> bool {
@@ -385,39 +310,32 @@ impl fmt::Debug for Session {
     }
 }
 
+use std::process::ChildStdout;
+
 struct TranscodeHandler {
     id: String,
-    process: Child,
+    process_stdout: ChildStdout,
+    pid: u32,
 }
 
 impl TranscodeHandler {
-    fn new(id: String, process: Child) -> Self {
-        Self { id, process }
+    fn new(id: String, process_stdout: ChildStdout, pid: u32) -> Self {
+        Self {
+            id,
+            process_stdout,
+            pid,
+        }
     }
 
-    fn handle(&mut self, signal: &SimpleAtomicBool) {
-        let stdio = BufReader::new(self.process.stdout.take().unwrap());
+    fn handle(self, signal: &SimpleAtomicBool) {
+        let stdio = BufReader::new(self.process_stdout);
         let mut map: HashMap<String, String> = HashMap::new();
-
-        /*
-            map.insert("frame".into(), "0".into());
-            map.insert("fps".into(), "0.0".into());
-            map.insert("stream_0_0_q".into(), "0.0".into());
-            map.insert("bitrate".into(), "0.0kbits/s".into());
-            map.insert("total_size".into(), "0".into());
-            map.insert("out_time_ms".into(), "0".into());
-            map.insert("out_time".into(), "00:00:00.000000".into());
-            map.insert("dup_frames".into(), "0".into());
-            map.insert("drop_frames".into(), "0".into());
-            map.insert("speed".into(), "0.00x".into());
-            map.insert("progress".into(), "continue".into());
-        */
 
         let mut stdio_b = stdio.lines().peekable();
 
         'stdout: while !signal.get() {
-            if stdio_b.peek().is_some() {
-                let output = stdio_b.next().unwrap().unwrap();
+            while stdio_b.peek().is_some() {
+                let output = dbg!(stdio_b.next().unwrap().unwrap());
                 let output: Vec<&str> = output.split('=').collect();
 
                 // remove whitespace on both ends
@@ -429,20 +347,14 @@ impl TranscodeHandler {
                 }
             }
 
-            match self.process.try_wait() {
-                Ok(Some(_)) => break 'stdout,
-                Ok(None) => {}
-                Err(x) => println!("handle_stdout got err on try_wait(): {:?}", x),
+            if crate::utils::is_process_effectively_dead(self.pid) {
+                break 'stdout;
             }
 
-            // sleep is necessary to avoid a deadlock.
-            std::thread::sleep(Duration::from_millis(50));
+            std::thread::sleep(Duration::from_millis(100));
         }
 
         println!("Broken out of stdout loop, killing ffmpeg");
-
-        let _ = self.process.kill();
-        let _ = self.process.wait();
 
         let mut lock = STREAMING_SESSION.write().unwrap();
         let _ = lock.remove(&self.id);
