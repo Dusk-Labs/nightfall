@@ -52,7 +52,7 @@ cfg_if::cfg_if! {
         pub fn is_process_effectively_dead(pid: u32) -> bool {
             unsafe {
                 let process_handle = OpenProcess(PROCESS_ALL_ACCESS, 0, pid as u32);
-                WaitForSingleObject(process_handle) != WAIT_TIMEOUT
+                WaitForSingleObject(process_handle, 0) != WAIT_TIMEOUT
             }
         }
     }
