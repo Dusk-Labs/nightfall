@@ -3,7 +3,6 @@ import { MediaPlayer } from "dashjs";
 import VideoControls from "./Controls/Index";
 import { VideoPlayerContext } from "./Context";
 import Load from "../Load";
-import EndsAt from "./EndsAt";
 
 import "./Index.scss";
 
@@ -15,6 +14,7 @@ function VideoPlayer() {
   const [manifestLoading, setManifestLoading] = useState(false);
   const [manifestLoaded, setManifestLoaded] = useState(false);
   const [canPlay, setCanPlay] = useState(false);
+  const [waiting, setWaiting] = useState(false);
 
   const [buffer, setBuffer] = useState(true);
   const [paused, setPaused] = useState(false);
@@ -54,6 +54,7 @@ function VideoPlayer() {
   const eCanPlay = useCallback(() => {
     setDuration(Math.round(player.duration()) | 0);
     setCanPlay(true);
+    setWaiting(false);
   }, [player]);
 
   const ePlayBackPaused = useCallback(() => {
@@ -68,8 +69,18 @@ function VideoPlayer() {
     setBuffer(Math.round(player.getBufferLength()));
   }, [player]);
 
-  const ePlayBackWaiting = useCallback((e) => {
-    // console.log("[Video] waiting", e);
+  const ePlayBackWaiting = useCallback(e => {
+    setWaiting(true);
+  }, []);
+
+  const eError = useCallback(e => {
+    console.log("[Error]", e);
+  }, []);
+
+  const ePlayBackNotAllowed = useCallback(e => {
+    if (e.type === "playbackNotAllowed") {
+      setPaused(true);
+    }
   }, []);
 
   /*
@@ -92,6 +103,8 @@ function VideoPlayer() {
     player.on(MediaPlayer.events.PLAYBACK_PROGRESS, ePlayBackProgress);
     player.on(MediaPlayer.events.PLAYBACK_WAITING, ePlayBackWaiting);
     player.on(MediaPlayer.events.PLAYBACK_TIME_UPDATED, ePlayBackTimeUpdated);
+    player.on(MediaPlayer.events.PLAYBACK_NOT_ALLOWED, ePlayBackNotAllowed);
+    player.on(MediaPlayer.events.ERROR, eError);
 
     return () => {
       player.off(MediaPlayer.events.MANIFEST_LOADED, eManifestLoad);
@@ -101,8 +114,10 @@ function VideoPlayer() {
       player.off(MediaPlayer.events.PLAYBACK_PROGRESS, ePlayBackProgress);
       player.off(MediaPlayer.events.PLAYBACK_WAITING, ePlayBackWaiting);
       player.off(MediaPlayer.events.PLAYBACK_TIME_UPDATED, ePlayBackTimeUpdated);
+      player.off(MediaPlayer.events.PLAYBACK_NOT_ALLOWED, ePlayBackNotAllowed);
+      player.off(MediaPlayer.events.ERROR, eError);
     }
-  }, [eCanPlay, eManifestLoad, ePlayBackPaused, ePlayBackPlaying, ePlayBackProgress, ePlayBackTimeUpdated, ePlayBackWaiting, player])
+  }, [eCanPlay, eError, eManifestLoad, ePlayBackNotAllowed, ePlayBackPaused, ePlayBackPlaying, ePlayBackProgress, ePlayBackTimeUpdated, ePlayBackWaiting, player])
 
   const initialValue = {
     player,
@@ -127,13 +142,8 @@ function VideoPlayer() {
         />
         <div className="overlay">
           {(manifestLoading || !canPlay) && <Load/>}
-          {(manifestLoaded && canPlay) && (
-            <>
-              <div className="cover"/>
-              <VideoControls/>
-              <EndsAt/>
-            </>
-          )}
+          {(manifestLoaded && canPlay) && <VideoControls/>}
+          {waiting && <Load/>}
         </div>
       </div>
     </VideoPlayerContext.Provider>
