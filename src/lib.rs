@@ -55,7 +55,6 @@ use crate::error::*;
 use crate::profile::*;
 use crate::session::Session;
 
-use std::collections::HashMap;
 use std::collections::VecDeque;
 
 use std::sync::atomic::Ordering::SeqCst;
@@ -71,13 +70,14 @@ use crossbeam::channel::Sender;
 
 use dashmap::DashMap;
 
-pub type FfmpegSessionStats = Arc<RwLock<HashMap<String, HashMap<String, String>>>>;
-
 /// Represents a operation that a route can dispatch to the state manager.
 #[derive(Debug)]
 pub enum OpCode {
     /// Represents a request for a init chunk.
-    ChunkInitRequest { chunk: u64, chan: Sender<Result<String>> },
+    ChunkInitRequest {
+        chunk: u64,
+        chan: Sender<Result<String>>,
+    },
     /// This operation is used when a client has requested a chunk of a stream.
     ChunkRequest {
         chunk: u64,
@@ -120,17 +120,10 @@ pub struct StateManager {
     session_monitors: Arc<RwLock<Vec<JoinHandle<()>>>>,
     /// Cleaner thread reaps sessions that have time outed.
     cleaner: Arc<JoinHandle<()>>,
-    /// FFMPEG session stats that we can poll
-    session_stats: FfmpegSessionStats,
 }
 
 impl StateManager {
-    pub fn new(
-        outdir: String,
-        ffmpeg_bin: String,
-        ffprobe_bin: String,
-        session_stats: FfmpegSessionStats,
-    ) -> Self {
+    pub fn new(outdir: String, ffmpeg_bin: String, ffprobe_bin: String) -> Self {
         let sessions = Arc::new(DashMap::new());
         let map_clone = Arc::clone(&sessions);
 
@@ -139,7 +132,6 @@ impl StateManager {
             sessions,
             ffmpeg_bin,
             ffprobe_bin,
-            session_stats,
 
             chunk_requester: Arc::new(DashMap::new()),
             session_monitors: Arc::new(RwLock::new(Vec::new())),
@@ -202,13 +194,13 @@ impl StateManager {
                         } else {
                             false
                         };
-         
+
                         // if we get here, and the session is paused we need to start it again.
                         if session.paused.load(SeqCst) {
                             session.cont();
                         }
 
-                        if should_hard_seek {      
+                        if should_hard_seek {
                             session.join();
                             session.reset_to(chunk);
                             session.start();
@@ -225,7 +217,7 @@ impl StateManager {
 
                         last_chunk_num = chunk;
                     }
-                },
+                }
 
                 Some(OpCode::ChunkInitRequest { chunk, chan }) => {
                     if dbg!(!session.is_chunk_done(chunk)) {
@@ -234,7 +226,7 @@ impl StateManager {
                             session.join();
                             session.reset_to(chunk);
                             session.start();
-                
+
                             hard_seeked_at = chunk;
                             last_hard_seek = Instant::now();
                         }
@@ -251,7 +243,10 @@ impl StateManager {
 
             let mut item = rx.try_recv().ok();
 
-            if matches!(item, Some(OpCode::ChunkRequest { .. }) | Some(OpCode::ChunkInitRequest { .. })) {
+            if matches!(
+                item,
+                Some(OpCode::ChunkRequest { .. }) | Some(OpCode::ChunkInitRequest { .. })
+            ) {
                 println!("pushing to backlog");
                 cr_backlog.push_front(item.take().unwrap());
                 continue;
@@ -356,7 +351,10 @@ impl StateManager {
         };
 
         let (tx, rx) = unbounded();
-        let chunk_request = OpCode::ChunkInitRequest { chunk: first_chunk, chan: tx };
+        let chunk_request = OpCode::ChunkInitRequest {
+            chunk: first_chunk,
+            chan: tx,
+        };
         session_tx.send(chunk_request);
 
         // we got here, that means chunk 0 is done.
