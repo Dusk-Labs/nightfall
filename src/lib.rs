@@ -149,11 +149,9 @@ impl StateManager {
 
     fn session_monitor(
         session_id: String,
-        tx: Sender<OpCode>,
         rx: Receiver<OpCode>,
         sessions: Arc<DashMap<String, Session>>,
     ) {
-        let mut last_chunk_num = 0;
         let mut last_hard_seek = Instant::now();
         let mut hard_seeked_at = 0;
 
@@ -165,8 +163,8 @@ impl StateManager {
             match cr_backlog.pop_back() {
                 Some(OpCode::ChunkRequest { chunk, chan }) => {
                     if !session.is_chunk_done(chunk) {
-                        let eta = dbg!(session.eta_for(chunk).as_millis() as f64);
-                        let eta_tol = dbg!((10_000.0 / session.raw_speed()).max(8_000.0));
+                        let eta = session.eta_for(chunk).as_millis() as f64;
+                        let eta_tol = (10_000.0 / session.raw_speed()).max(8_000.0);
 
                         // FIXME: This pathway is only reached if the video is being played with mpv/vlc and so on.
                         let should_hard_seek = if chunk < session.start_num() {
@@ -214,13 +212,11 @@ impl StateManager {
                         let chunk_path = session.chunk_to_path(chunk);
                         session.reset_timeout(chunk);
                         chan.send(Ok(chunk_path));
-
-                        last_chunk_num = chunk;
                     }
                 }
 
                 Some(OpCode::ChunkInitRequest { chunk, chan }) => {
-                    if dbg!(!session.is_chunk_done(chunk)) {
+                    if !session.is_chunk_done(chunk) {
                         // if the chunk isnt done and start_num isnt what we expect we hard seek
                         if session.start_num() != chunk {
                             session.join();
@@ -313,12 +309,12 @@ impl StateManager {
         let (session_tx, session_rx) = unbounded();
         let sessions = self.sessions.clone();
         let session_id_clone = session_id.clone();
-        let session_tx_clone = session_tx.clone();
+
         self.session_monitors
             .write()
             .unwrap()
             .push(thread::spawn(move || {
-                Self::session_monitor(session_id_clone, session_tx_clone, session_rx, sessions);
+                Self::session_monitor(session_id_clone, session_rx, sessions);
             }));
 
         // insert the tx channel into our map

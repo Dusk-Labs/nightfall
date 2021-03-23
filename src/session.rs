@@ -264,13 +264,13 @@ impl Session {
 
     // returns how many chunks per second
     pub fn speed(&self) -> f64 {
-        (dbg!(self.raw_speed()).floor().max(20.0) * 24.0) / (CHUNK_SIZE as f64 * 24.0)
+        (self.raw_speed().floor().max(20.0) * 24.0) / (CHUNK_SIZE as f64 * 24.0)
     }
 
     pub fn eta_for(&self, chunk: u64) -> Duration {
-        let cps = dbg!(self.speed());
+        let cps = self.speed();
 
-        let current_chunk = dbg!(self.current_chunk() as f64);
+        let current_chunk = self.current_chunk() as f64;
         let diff = (chunk as f64 - current_chunk).abs();
 
         Duration::from_secs((diff / cps).abs().ceil() as u64)
