@@ -65,7 +65,7 @@ impl Session {
         stream_type: StreamType,
         ffmpeg_bin: String,
     ) -> Self {
-        std::fs::create_dir(&outdir).unwrap();
+        std::fs::create_dir_all(&outdir).unwrap();
 
         Self {
             id,
