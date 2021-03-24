@@ -14,10 +14,12 @@ use std::process::Command;
 use std::process::Stdio;
 use std::time::Duration;
 
+use std::cell::RefCell;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::SeqCst;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::RwLock;
 
 use crossbeam::atomic::AtomicCell;
@@ -52,7 +54,7 @@ pub struct Session {
     last_chunk: AtomicU64,
 
     child_pid: AtomicCell<Option<u32>>,
-    real_process: AtomicCell<Option<Child>>,
+    real_process: Arc<Mutex<RefCell<Option<Child>>>>,
 }
 
 impl Session {
@@ -79,7 +81,7 @@ impl Session {
             paused: AtomicBool::new(false),
             has_started: AtomicBool::new(false),
             child_pid: AtomicCell::new(None),
-            real_process: AtomicCell::new(None),
+            real_process: Arc::new(Mutex::new(RefCell::new(None))),
             file,
         }
     }
@@ -113,7 +115,9 @@ impl Session {
         let stdout = process.stdout.take().unwrap();
         let stdout_parser_thread = TranscodeHandler::new(self.id.clone(), stdout, process.id());
 
-        self.real_process.store(Some(process));
+        let lock = self.real_process.lock().unwrap();
+        let mut proc_ref = lock.borrow_mut();
+        *proc_ref = Some(process);
 
         self.process
             .store(Some(stoppable_thread::spawn(move |signal| {
@@ -214,20 +218,19 @@ impl Session {
     }
 
     pub fn join(&self) {
-        if let Some(mut x) = self.real_process.take() {
+        if let Some(x) = self.real_process.lock().unwrap().borrow_mut().as_mut() {
             x.kill();
             x.wait();
         }
     }
 
     pub fn try_wait(&self) -> bool {
-        if let Some(mut x) = self.real_process.take() {
+        if let Some(x) = self.real_process.lock().unwrap().borrow_mut().as_mut() {
             if let Ok(Some(_)) = x.try_wait() {
                 x.wait();
                 return true;
             }
 
-            self.real_process.store(Some(x));
             return false;
         }
         true
