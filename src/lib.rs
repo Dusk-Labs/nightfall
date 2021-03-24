@@ -228,6 +228,10 @@ impl StateManager {
                         }
 
                         cr_backlog.push_back(OpCode::ChunkInitRequest { chunk, chan });
+
+                        if session.paused.load(SeqCst) {
+                            session.cont();
+                        }
                     } else {
                         let chunk_path = session.chunk_to_path(session.start_num());
                         chan.send(Ok(chunk_path));
@@ -281,7 +285,7 @@ impl StateManager {
             }
 
             // if we get here that means the chunk isnt done yet, so we sleep for a bit.
-            thread::sleep(Duration::from_millis(200));
+            thread::sleep(Duration::from_millis(10));
         }
     }
 
