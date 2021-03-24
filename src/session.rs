@@ -220,6 +220,19 @@ impl Session {
         }
     }
 
+    pub fn try_wait(&self) -> bool {
+        if let Some(mut x) = self.real_process.take() {
+            if let Ok(Some(_)) = x.try_wait() {
+                x.wait();
+                return true;
+            }
+
+            self.real_process.store(Some(x));
+            return false;
+        }
+        true
+    }
+
     pub fn pause(&self) {
         if let Some(x) = self.child_pid.load() {
             crate::utils::pause_proc(x as i32);
