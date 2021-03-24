@@ -138,7 +138,7 @@ impl StateManager {
 
             cleaner: Arc::new(thread::spawn(move || loop {
                 for v in map_clone.iter() {
-                    if v.is_timeout() && !v.paused.load(SeqCst) {
+                    if v.is_timeout() && !v.paused.load(SeqCst) && !v.try_wait() {
                         v.pause();
                     }
                 }
