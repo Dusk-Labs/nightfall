@@ -1,8 +1,7 @@
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
 pub enum StreamType {
-    Video,
-    Audio,
-    Muxed,
+    Video(usize),
+    Audio(usize),
 }
 
 #[derive(Clone, Copy)]
@@ -22,7 +21,7 @@ impl Profile {
             Self::Native => (vec!["-c:0", "libx264", "-preset", "veryfast"], "max"),
             Self::High => (
                 vec![
-                    "-c:v",
+                    "-c:0",
                     "libx264",
                     "-b:v",
                     "5M",

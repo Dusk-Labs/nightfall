@@ -89,7 +89,7 @@ impl Session {
         self.has_started.store(true, SeqCst);
         self.paused.store(false, SeqCst);
         let _ = fs::create_dir_all(self.outdir.clone());
-        let args = self.build_args();
+        let args = dbg!(self.build_args());
 
         // FIXME(Windows): For some reason if we dont tell rust to
         // use real stderr for ffmpeg instead of creating a new pipe
@@ -139,22 +139,28 @@ impl Session {
         ];
 
         match self.stream_type {
-            StreamType::Audio => {
+            StreamType::Audio(stream) => {
                 args.append(&mut vec![
-                    "-copyts", "-map", "0:1", "-c:0", "aac", "-ac", "2", "-ab", "0", "-threads",
+                    "-copyts",
+                    "-map",
+                    string_to_static_str(format!("0:{}", stream)),
+                    "-c:0",
+                    "aac",
+                    "-ac",
+                    "2",
+                    "-ab",
+                    "0",
+                    "-threads",
                     "1",
                 ]);
             }
-            StreamType::Video => {
-                args.append(&mut vec!["-copyts", "-map", "0:0"]);
-                args.append(&mut self.profile.to_params().0);
-            }
-            StreamType::Muxed => {
-                args.append(&mut vec!["-copyts"]);
-                args.append(&mut self.profile.to_params().0);
+            StreamType::Video(stream) => {
                 args.append(&mut vec![
-                    "-c:a", "copy", "-ac", "2", "-ab", "0", "-threads", "1",
+                    "-copyts",
+                    "-map",
+                    string_to_static_str(format!("0:{}", stream)),
                 ]);
+                args.append(&mut self.profile.to_params().0);
             }
         }
 
@@ -235,7 +241,7 @@ impl Session {
 
     pub fn current_chunk(&self) -> u64 {
         let frame = match self.stream_type {
-            StreamType::Audio => {
+            StreamType::Audio(_) => {
                 self.get_key("out_time_us")
                     .map(|x| x.parse::<u64>().unwrap_or(0))
                     .unwrap_or(0)
@@ -243,15 +249,15 @@ impl Session {
                     / 1000
                     * 24
             }
-            StreamType::Video | StreamType::Muxed => self
+            StreamType::Video(_) => self
                 .get_key("frame")
                 .map(|x| x.parse::<u64>().unwrap_or(0))
                 .unwrap_or(0),
         };
 
         match self.stream_type {
-            StreamType::Audio => (frame / (CHUNK_SIZE * 24)).max(self.last_chunk.load(SeqCst)),
-            StreamType::Video | StreamType::Muxed => frame / (CHUNK_SIZE * 24) + self.start_num(),
+            StreamType::Audio(_) => (frame / (CHUNK_SIZE * 24)).max(self.last_chunk.load(SeqCst)),
+            StreamType::Video(_) => frame / (CHUNK_SIZE * 24) + self.start_num(),
         }
     }
 
