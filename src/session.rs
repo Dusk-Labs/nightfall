@@ -13,6 +13,7 @@ use std::process::Child;
 use std::process::Command;
 use std::process::Stdio;
 use std::time::Duration;
+use std::time::Instant;
 
 use std::cell::RefCell;
 use std::sync::atomic::AtomicBool;
@@ -52,6 +53,7 @@ pub struct Session {
     pub start_number: AtomicU64,
     stream_type: StreamType,
     last_chunk: AtomicU64,
+    hard_timeout: AtomicCell<Instant>,
 
     child_pid: AtomicCell<Option<u32>>,
     real_process: Arc<Mutex<RefCell<Option<Child>>>>,
@@ -82,6 +84,7 @@ impl Session {
             has_started: AtomicBool::new(false),
             child_pid: AtomicCell::new(None),
             real_process: Arc::new(Mutex::new(RefCell::new(None))),
+            hard_timeout: AtomicCell::new(Instant::now()),
             file,
         }
     }
@@ -236,6 +239,10 @@ impl Session {
         true
     }
 
+    pub fn is_hard_timeout(&self) -> bool {
+        Instant::now() > self.hard_timeout.load()
+    }
+
     pub fn pause(&self) {
         if let Some(x) = self.child_pid.load() {
             crate::utils::pause_proc(x as i32);
@@ -310,6 +317,8 @@ impl Session {
 
     pub fn reset_timeout(&self, last_requested: u64) {
         self.last_chunk.store(last_requested, SeqCst);
+        self.hard_timeout
+            .store(Instant::now() + Duration::from_secs(30 * 60));
     }
 
     pub fn chunk_to_path(&self, chunk_num: u64) -> String {

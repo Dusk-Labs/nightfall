@@ -140,7 +140,14 @@ impl StateManager {
             session_monitors: Arc::new(RwLock::new(Vec::new())),
 
             cleaner: Arc::new(thread::spawn(move || loop {
-                map_clone.retain(|_, v| !v.try_wait());
+                map_clone.retain(|_, v| {
+                    if v.is_hard_timeout() {
+                        v.join();
+                        return false;
+                    } else {
+                        return !v.try_wait();
+                    }
+                });
                 for v in map_clone.iter() {
                     if v.is_timeout() && !v.paused.load(SeqCst) && !v.try_wait() {
                         v.pause();
