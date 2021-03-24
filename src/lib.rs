@@ -251,7 +251,6 @@ impl StateManager {
                 item,
                 Some(OpCode::ChunkRequest { .. }) | Some(OpCode::ChunkInitRequest { .. })
             ) {
-                println!("pushing to backlog");
                 cr_backlog.push_front(item.take().unwrap());
                 continue;
             }
