@@ -142,9 +142,14 @@ impl StateManager {
             cleaner: Arc::new(thread::spawn(move || loop {
                 map_clone.retain(|_, v| {
                     if v.is_hard_timeout() {
+                        println!("hard timeout killing");
                         v.join();
                         return false;
                     } else {
+                        if v.try_wait() {
+                            println!("try wait, ffmpeg died, killing");
+                            return false;
+                        }
                         return !v.try_wait();
                     }
                 });
