@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::fs;
 use std::io;
+use std::io::Read;
 
 use std::io::BufRead;
 use std::io::BufReader;
@@ -227,6 +228,16 @@ impl Session {
         }
     }
 
+    pub fn stderr(&self) -> Option<String> {
+        if let Some(x) = self.real_process.lock().unwrap().borrow_mut().as_mut() {
+            let mut buf = String::new();
+            x.stderr.as_mut()?.read_to_string(&mut buf);
+            return Some(buf);
+        }
+
+        None
+    }
+
     pub fn try_wait(&self) -> bool {
         if let Some(x) = self.real_process.lock().unwrap().borrow_mut().as_mut() {
             if let Ok(Some(_)) = x.try_wait() {
@@ -236,7 +247,8 @@ impl Session {
 
             return false;
         }
-        true
+        // we only want to return `true` here if ffmpeg died on its own and was cleaned later
+        self.has_started()
     }
 
     pub fn is_hard_timeout(&self) -> bool {
