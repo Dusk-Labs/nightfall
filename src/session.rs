@@ -84,7 +84,7 @@ impl Session {
             has_started: AtomicBool::new(false),
             child_pid: AtomicCell::new(None),
             real_process: Arc::new(Mutex::new(RefCell::new(None))),
-            hard_timeout: AtomicCell::new(Instant::now()),
+            hard_timeout: AtomicCell::new(Instant::now() + Duration::from_secs(30 * 60)),
             file,
         }
     }
