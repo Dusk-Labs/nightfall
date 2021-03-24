@@ -97,6 +97,9 @@ pub enum OpCode {
         chunk: u64,
         chan: Sender<Result<bool>>,
     },
+    Kill {
+        chan: Sender<Result<()>>,
+    },
 }
 
 /// This is our state manager. It keeps track of all of our transcoding sessions.
@@ -137,6 +140,7 @@ impl StateManager {
             session_monitors: Arc::new(RwLock::new(Vec::new())),
 
             cleaner: Arc::new(thread::spawn(move || loop {
+                map_clone.retain(|_, v| !v.try_wait());
                 for v in map_clone.iter() {
                     if v.is_timeout() && !v.paused.load(SeqCst) && !v.try_wait() {
                         v.pause();
@@ -282,6 +286,11 @@ impl StateManager {
                     > (10_000.0 / session.raw_speed()).max(5_000.0)));
 
                 continue;
+            }
+
+            if let Some(OpCode::Kill { chan }) = item {
+                session.join();
+                chan.send(Ok(()));
             }
 
             // if we get here that means the chunk isnt done yet, so we sleep for a bit.
