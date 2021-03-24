@@ -8,6 +8,7 @@ pub enum StreamType {
 #[derive(Clone, Copy)]
 pub enum Profile {
     Direct,
+    Native,
     High,
     Medium,
     Low,
@@ -18,6 +19,7 @@ impl Profile {
     pub fn to_params(&self) -> (Vec<&str>, &str) {
         match self {
             Self::Direct => (vec!["-c:0", "copy"], "direct"),
+            Self::Native => (vec!["-c:0", "libx264", "-preset", "veryfast"], "max"),
             Self::High => (
                 vec![
                     "-c:v",
