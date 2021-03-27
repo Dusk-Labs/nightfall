@@ -255,6 +255,14 @@ impl Session {
         Instant::now() > self.hard_timeout.load()
     }
 
+    pub fn set_timeout(&self) {
+        self.hard_timeout.store(Instant::now());
+    }
+
+    pub fn delete_tmp(&self) {
+        fs::remove_dir_all(self.outdir.clone());
+    }
+
     pub fn pause(&self) {
         if let Some(x) = self.child_pid.load() {
             crate::utils::pause_proc(x as i32);

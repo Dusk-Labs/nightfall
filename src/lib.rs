@@ -97,7 +97,7 @@ pub enum OpCode {
         chunk: u64,
         chan: Sender<Result<bool>>,
     },
-    Kill {
+    Die {
         chan: Sender<Result<()>>,
     },
     GetStderr {
@@ -151,6 +151,7 @@ impl StateManager {
                 map_clone.retain(|_, v| {
                     if v.is_hard_timeout() {
                         v.join();
+                        v.delete_tmp();
                         return false;
                     } else {
                         return !v.try_wait();
@@ -274,7 +275,7 @@ impl StateManager {
                 continue;
             }
 
-            if let OpCode::Kill { chan } = item {
+            if let OpCode::Die { chan } = item {
                 session.join();
                 chan.send(Ok(()));
                 continue;
@@ -418,6 +419,18 @@ impl StateManager {
 
         let (chan, rx) = unbounded();
         sender.send(OpCode::GetStderr { chan });
+
+        rx.recv().map_err(|_| NightfallError::Aborted).flatten()
+    }
+
+    pub fn kill(&self, session_id: String) -> Result<()> {
+        let sender = self
+            .chunk_requester
+            .get(&session_id)
+            .ok_or(NightfallError::SessionDoesntExist)?;
+
+        let (chan, rx) = unbounded();
+        sender.send(OpCode::Die { chan });
 
         rx.recv().map_err(|_| NightfallError::Aborted).flatten()
     }
