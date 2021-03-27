@@ -105,6 +105,33 @@ pub enum OpCode {
     },
 }
 
+impl OpCode {
+    pub fn cancel(&self) {
+        let msg = Err(NightfallError::Aborted);
+        match self {
+            Self::ChunkInitRequest { chan, .. } => {
+                chan.send(msg);
+            }
+            Self::ChunkRequest { chan, .. } => {
+                chan.send(msg);
+            }
+            Self::ChunkEta { chan, .. } => {
+                chan.send(Err(NightfallError::Aborted));
+            }
+            Self::ShouldClientHardSeek { chan, .. } => {
+                chan.send(Err(NightfallError::Aborted));
+            }
+            Self::Die { chan, .. } => {
+                chan.send(Ok(()));
+            }
+            Self::GetStderr { chan, .. } => {
+                chan.send(msg);
+            }
+            _ => {}
+        }
+    }
+}
+
 /// This is our state manager. It keeps track of all of our transcoding sessions.
 /// Cleans up sessions that have time outted.
 pub struct StateManager {
@@ -148,14 +175,20 @@ impl StateManager {
             session_monitors: Arc::new(RwLock::new(Vec::new())),
 
             cleaner: Arc::new(thread::spawn(move || loop {
-                map_clone.retain(|_, v| {
+                map_clone.retain(|k, v| {
                     if v.is_hard_timeout() {
                         v.join();
                         v.delete_tmp();
+                        exit_statuses_clone.insert(k.clone(), v.stderr().unwrap_or_default());
                         return false;
                     } else {
-                        return !v.try_wait();
+                        if !v.try_wait() {
+                            exit_statuses_clone.insert(k.clone(), v.stderr().unwrap_or_default());
+                            return false;
+                        }
                     }
+
+                    true
                 });
                 for v in map_clone.iter() {
                     if v.is_timeout() && !v.paused.load(SeqCst) && !v.try_wait() {
@@ -176,7 +209,13 @@ impl StateManager {
         let mut hard_seeked_at = 0;
 
         while let Ok(item) = rx.recv() {
-            let session = sessions.get(&session_id).unwrap();
+            let session = match sessions.get(&session_id) {
+                Some(x) => x,
+                None => {
+                    item.cancel();
+                    return;
+                }
+            };
 
             if let OpCode::ChunkInitRequest { chunk, chan } = item {
                 if !session.is_chunk_done(chunk) {
@@ -421,7 +460,15 @@ impl StateManager {
         let (chan, rx) = unbounded();
         sender.send(OpCode::GetStderr { chan });
 
-        rx.recv().map_err(|_| NightfallError::Aborted).flatten()
+        rx.recv()
+            .map_err(|_| NightfallError::Aborted)
+            .flatten()
+            .or_else(|_| {
+                self.exit_statuses
+                    .get(&session_id)
+                    .map(|x| x.value().clone())
+                    .ok_or(NightfallError::Aborted)
+            })
     }
 
     pub fn kill(&self, session_id: String) -> Result<()> {
