@@ -100,6 +100,9 @@ pub enum OpCode {
     Kill {
         chan: Sender<Result<()>>,
     },
+    GetStderr {
+        chan: Sender<Result<String>>,
+    },
 }
 
 /// This is our state manager. It keeps track of all of our transcoding sessions.
@@ -123,18 +126,23 @@ pub struct StateManager {
     session_monitors: Arc<RwLock<Vec<JoinHandle<()>>>>,
     /// Cleaner thread reaps sessions that have time outed.
     cleaner: Arc<JoinHandle<()>>,
+    /// Exit status
+    exit_statuses: Arc<DashMap<String, String>>,
 }
 
 impl StateManager {
     pub fn new(outdir: String, ffmpeg_bin: String, ffprobe_bin: String) -> Self {
         let sessions = Arc::new(DashMap::new());
+        let exit_statuses = Arc::new(DashMap::new());
         let map_clone = Arc::clone(&sessions);
+        let exit_statuses_clone = Arc::clone(&exit_statuses);
 
         Self {
             outdir,
             sessions,
             ffmpeg_bin,
             ffprobe_bin,
+            exit_statuses,
 
             chunk_requester: Arc::new(DashMap::new()),
             session_monitors: Arc::new(RwLock::new(Vec::new())),
@@ -142,14 +150,9 @@ impl StateManager {
             cleaner: Arc::new(thread::spawn(move || loop {
                 map_clone.retain(|_, v| {
                     if v.is_hard_timeout() {
-                        println!("hard timeout killing");
                         v.join();
                         return false;
                     } else {
-                        if v.try_wait() {
-                            println!("try wait, ffmpeg died, killing");
-                            return false;
-                        }
                         return !v.try_wait();
                     }
                 });
@@ -171,108 +174,80 @@ impl StateManager {
         let mut last_hard_seek = Instant::now();
         let mut hard_seeked_at = 0;
 
-        let mut cr_backlog = VecDeque::new();
-
-        loop {
+        while let Ok(item) = rx.recv() {
             let session = sessions.get(&session_id).unwrap();
 
-            match cr_backlog.pop_back() {
-                Some(OpCode::ChunkRequest { chunk, chan }) => {
-                    if !session.is_chunk_done(chunk) {
-                        let eta = session.eta_for(chunk).as_millis() as f64;
-                        let eta_tol = (10_000.0 / session.raw_speed()).max(8_000.0);
+            if let OpCode::ChunkInitRequest { chunk, chan } = item {
+                if !session.is_chunk_done(chunk) {
+                    // if the chunk isnt done and start_num isnt what we expect we hard seek
+                    if session.start_num() != chunk {
+                        session.join();
+                        session.reset_to(chunk);
+                        session.start();
 
-                        // FIXME: This pathway is only reached if the video is being played with mpv/vlc and so on.
-                        let should_hard_seek = if chunk < session.start_num() {
-                            println!("Hard seeking because we are seeking backwards");
-                            true
-                        } else if chunk > session.current_chunk() + 15
-                            && Instant::now() < last_hard_seek + Duration::from_secs(15)
-                            && chunk > hard_seeked_at
-                        {
-                            // FIXME: When we hard seek and start a new ffmpeg session for some reason ffmpeg
-                            // reports invalid speed but then evens out. The problem is that causes seeking
-                            // multiple times in a row to be very slow.
-                            // thus for like the first 10s after a hard seek we exclusively hard seek if the
-                            // target is over 10 chunks into the future.
-                            println!("Hard seeking because of hard seek cooldown");
-                            true
-                        } else if eta > eta_tol {
-                            // we tolerate a max eta of (10 / raw_speed).
-                            // if speed is 1.0x then eta will be 10s.
-                            println!(
-                                "CR {}/{} hard seek because eta {} is higher than the max tolerance eta {}",
-                                session_id, chunk, eta, eta_tol
-                            );
-                            true
-                        } else {
-                            false
-                        };
-
-                        // if we get here, and the session is paused we need to start it again.
-                        if session.paused.load(SeqCst) {
-                            session.cont();
-                        }
-
-                        if should_hard_seek {
-                            session.join();
-                            session.reset_to(chunk);
-                            session.start();
-
-                            last_hard_seek = Instant::now();
-                            hard_seeked_at = chunk;
-                        }
-
-                        cr_backlog.push_back(OpCode::ChunkRequest { chunk, chan });
-                    } else {
-                        let chunk_path = session.chunk_to_path(chunk);
-                        session.reset_timeout(chunk);
-                        chan.send(Ok(chunk_path));
+                        hard_seeked_at = chunk;
+                        last_hard_seek = Instant::now();
                     }
+
+                    if session.paused.load(SeqCst) {
+                        session.cont();
+                    }
+
+                    chan.send(Err(NightfallError::ChunkNotDone));
+                } else {
+                    let chunk_path = session.chunk_to_path(session.start_num());
+                    chan.send(Ok(chunk_path));
                 }
 
-                Some(OpCode::ChunkInitRequest { chunk, chan }) => {
-                    if !session.is_chunk_done(chunk) {
-                        // if the chunk isnt done and start_num isnt what we expect we hard seek
-                        if session.start_num() != chunk {
-                            session.join();
-                            session.reset_to(chunk);
-                            session.start();
-
-                            hard_seeked_at = chunk;
-                            last_hard_seek = Instant::now();
-                        }
-
-                        cr_backlog.push_back(OpCode::ChunkInitRequest { chunk, chan });
-
-                        if session.paused.load(SeqCst) {
-                            session.cont();
-                        }
-                    } else {
-                        let chunk_path = session.chunk_to_path(session.start_num());
-                        chan.send(Ok(chunk_path));
-                    }
-                }
-
-                _ => {}
-            }
-
-            let mut item = rx.try_recv().ok();
-
-            if matches!(
-                item,
-                Some(OpCode::ChunkRequest { .. }) | Some(OpCode::ChunkInitRequest { .. })
-            ) {
-                cr_backlog.push_front(item.take().unwrap());
                 continue;
             }
 
-            if let Some(OpCode::ChunkEta { chunk, chan }) = item {
+            if let OpCode::ChunkRequest { chunk, chan } = item {
+                if !session.is_chunk_done(chunk) {
+                    let eta = session.eta_for(chunk).as_millis() as f64;
+                    let eta_tol = (10_000.0 / session.raw_speed()).max(8_000.0);
+
+                    // FIXME: When we hard seek and start a new ffmpeg session for some reason ffmpeg
+                    // reports invalid speed but then evens out. The problem is that causes seeking
+                    // multiple times in a row to be very slow.
+                    // thus for like the first 10s after a hard seek we exclusively hard seek if the
+                    // target is over 10 chunks into the future.
+                    let should_hard_seek = chunk < session.start_num()
+                        || (chunk > session.current_chunk() + 15
+                            && Instant::now() < last_hard_seek + Duration::from_secs(15)
+                            && chunk > hard_seeked_at)
+                        || eta > eta_tol;
+
+                    // if we get here, and the session is paused we need to start it again.
+                    if session.paused.load(SeqCst) {
+                        session.cont();
+                    }
+
+                    if should_hard_seek {
+                        session.join();
+                        session.reset_to(chunk);
+                        session.start();
+
+                        last_hard_seek = Instant::now();
+                        hard_seeked_at = chunk;
+                    }
+
+                    chan.send(Err(NightfallError::ChunkNotDone));
+                } else {
+                    let chunk_path = session.chunk_to_path(chunk);
+                    session.reset_timeout(chunk);
+                    chan.send(Ok(chunk_path));
+                }
+
+                continue;
+            }
+
+            if let OpCode::ChunkEta { chunk, chan } = item {
                 chan.send(Ok(session.eta_for(chunk).as_secs()));
                 continue;
             }
 
-            if let Some(OpCode::ShouldClientHardSeek { chunk, chan }) = item {
+            if let OpCode::ShouldClientHardSeek { chunk, chan } = item {
                 // if we are seeking backwards we always want to restart the stream
                 // This is because our init.mp4 gets overwritten if we seeked forward at some point
                 // Furthermore we want to hard seek anyway if the player is browser based.
@@ -299,13 +274,15 @@ impl StateManager {
                 continue;
             }
 
-            if let Some(OpCode::Kill { chan }) = item {
+            if let OpCode::Kill { chan } = item {
                 session.join();
                 chan.send(Ok(()));
+                continue;
             }
 
-            // if we get here that means the chunk isnt done yet, so we sleep for a bit.
-            thread::sleep(Duration::from_millis(10));
+            if let OpCode::GetStderr { chan } = item {
+                chan.send(session.stderr().ok_or(NightfallError::Aborted));
+            }
         }
     }
 
@@ -378,7 +355,7 @@ impl StateManager {
         session_tx.send(chunk_request);
 
         // we got here, that means chunk 0 is done.
-        let _path = rx.recv();
+        let _path = rx.recv().map_err(|_| NightfallError::Aborted).flatten()?;
 
         let session = self
             .sessions
@@ -429,6 +406,18 @@ impl StateManager {
 
         let (chan, rx) = unbounded();
         sender.send(OpCode::ShouldClientHardSeek { chunk, chan });
+
+        rx.recv().map_err(|_| NightfallError::Aborted).flatten()
+    }
+
+    pub fn get_stderr(&self, session_id: String) -> Result<String> {
+        let sender = self
+            .chunk_requester
+            .get(&session_id)
+            .ok_or(NightfallError::SessionDoesntExist)?;
+
+        let (chan, rx) = unbounded();
+        sender.send(OpCode::GetStderr { chan });
 
         rx.recv().map_err(|_| NightfallError::Aborted).flatten()
     }
