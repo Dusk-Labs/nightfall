@@ -23,6 +23,6 @@ err-derive = "0.3.0"
 nix = "0.20.0"
 psutil = "3.2.0"
 
-#[target.'cfg(windows)'.dependencies]
-#winapi = { version = "*", features = ["winerror", "synchapi", "minwinbase"] }
-#ntapi = "*"
+[target.'cfg(windows)'.dependencies]
+winapi = { version = "*", features = ["winerror", "synchapi", "minwinbase"] }
+ntapi = "*"
