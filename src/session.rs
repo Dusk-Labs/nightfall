@@ -102,7 +102,7 @@ impl Session {
         // ffmpeg starts but it wont execute anything, it just idles.
         cfg_if::cfg_if! {
             if #[cfg(unix)] {
-                let stderr = Stdio::inherit();
+                let stderr = Stdio::piped();
             } else {
                 let stderr = Stdio::inherit();
             }
