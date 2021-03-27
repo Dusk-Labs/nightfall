@@ -182,7 +182,7 @@ impl StateManager {
                         exit_statuses_clone.insert(k.clone(), v.stderr().unwrap_or_default());
                         return false;
                     } else {
-                        if !v.try_wait() {
+                        if v.try_wait() {
                             exit_statuses_clone.insert(k.clone(), v.stderr().unwrap_or_default());
                             return false;
                         }
