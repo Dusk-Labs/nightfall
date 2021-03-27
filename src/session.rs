@@ -227,7 +227,10 @@ impl Session {
         if let Some(x) = self.real_process.lock().unwrap().borrow_mut().as_mut() {
             let mut buf = String::new();
             x.stderr.as_mut()?.read_to_string(&mut buf);
-            return Some(buf);
+            if buf.len() <= 250 {
+                return Some(buf);
+            }
+            return Some(buf.split_off(buf.len() - 250));
         }
 
         None
