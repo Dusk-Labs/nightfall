@@ -172,9 +172,6 @@ impl Session {
             }
         }
 
-        // args needed to decrease the chances of a race condition when fetching a segment
-        args.append(&mut vec!["-flush_packets", "1"]);
-
         args.append(&mut vec![
             "-f",
             "hls",
@@ -201,10 +198,8 @@ impl Session {
             string_to_static_str(CHUNK_SIZE.to_string()),
             "-initial_offset",
             string_to_static_str((self.start_num() * CHUNK_SIZE).to_string()),
-            "-reset_timestamps",
-            "1",
             "-force_key_frames",
-            "expr:gte(t,n_forced*5)",
+            "expr:gte(t,n_forced*5.00)",
         ]);
 
         args.append(&mut vec!["-hls_segment_type", "1"]);
