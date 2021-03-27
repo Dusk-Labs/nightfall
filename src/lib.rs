@@ -181,11 +181,9 @@ impl StateManager {
                         v.delete_tmp();
                         exit_statuses_clone.insert(k.clone(), v.stderr().unwrap_or_default());
                         return false;
-                    } else {
-                        if v.try_wait() {
-                            exit_statuses_clone.insert(k.clone(), v.stderr().unwrap_or_default());
-                            return false;
-                        }
+                    } else if v.try_wait() {
+                        exit_statuses_clone.insert(k.clone(), v.stderr().unwrap_or_default());
+                        return true;
                     }
 
                     true
@@ -396,7 +394,10 @@ impl StateManager {
         session_tx.send(chunk_request);
 
         // we got here, that means chunk 0 is done.
-        let _path = rx.recv().map_err(|_| NightfallError::Aborted).flatten()?;
+        let _path = rx
+            .recv()
+            .map_err(|_| NightfallError::SessionManagerDied)
+            .flatten()?;
 
         let session = self
             .sessions

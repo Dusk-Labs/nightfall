@@ -239,11 +239,9 @@ impl Session {
                 x.wait();
                 return true;
             }
-
-            return false;
         }
-        // we only want to return `true` here if ffmpeg died on its own and was cleaned later
-        self.has_started()
+
+        return false;
     }
 
     pub fn is_hard_timeout(&self) -> bool {

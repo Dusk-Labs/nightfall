@@ -1,8 +1,9 @@
 use err_derive::Error;
+use serde::Serialize;
 
 pub type Result<T> = std::result::Result<T, NightfallError>;
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, Serialize)]
 pub enum NightfallError {
     #[error(display = "The requested session doesnt exist")]
     SessionDoesntExist,
