@@ -277,6 +277,7 @@ impl StateManager {
 
             if let OpCode::Die { chan } = item {
                 session.join();
+                session.set_timeout();
                 chan.send(Ok(()));
                 continue;
             }

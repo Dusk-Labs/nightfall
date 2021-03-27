@@ -260,7 +260,7 @@ impl Session {
     }
 
     pub fn delete_tmp(&self) {
-        fs::remove_dir_all(self.outdir.clone());
+        fs::remove_dir_all(dbg!(self.outdir.clone())).unwrap();
     }
 
     pub fn pause(&self) {
