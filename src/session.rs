@@ -139,6 +139,8 @@ impl Session {
     // such as fps that isnt 24
     fn build_args(&self) -> Vec<&str> {
         let mut args = vec![
+            "-fflags",
+            "+genpts",
             "-y",
             "-ss",
             string_to_static_str((self.start_num() * CHUNK_SIZE).to_string()),
@@ -173,6 +175,14 @@ impl Session {
         }
 
         args.append(&mut vec![
+            "-copyts",
+            "-avoid_negative_ts",
+            "disabled",
+            "-max_muxing_queue_size",
+            "2048",
+        ]);
+
+        args.append(&mut vec![
             "-f",
             "hls",
             "-start_number",
@@ -193,6 +203,8 @@ impl Session {
             string_to_static_str(format!("{}_init.mp4", self.start_num())),
         ]);
 
+        // param might fix the issue where first seek in a session results in a invalid offset and
+        // timestamp.
         args.append(&mut vec!["-reset_timestamps", "1"]);
 
         args.append(&mut vec![
