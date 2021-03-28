@@ -56,7 +56,7 @@ pub struct Session {
     last_chunk: AtomicU64,
     hard_timeout: AtomicCell<Instant>,
 
-    child_pid: AtomicCell<Option<u32>>,
+    child_pid: Arc<Mutex<RefCell<Option<u32>>>>,
     real_process: Arc<Mutex<RefCell<Option<Child>>>>,
 }
 
@@ -83,7 +83,7 @@ impl Session {
             process: AtomicCell::new(None),
             paused: AtomicBool::new(false),
             has_started: AtomicBool::new(false),
-            child_pid: AtomicCell::new(None),
+            child_pid: Arc::new(Mutex::new(RefCell::new(None))),
             real_process: Arc::new(Mutex::new(RefCell::new(None))),
             hard_timeout: AtomicCell::new(Instant::now() + Duration::from_secs(30 * 60)),
             file,
@@ -114,7 +114,8 @@ impl Session {
             .args(args.as_slice())
             .spawn()?;
 
-        self.child_pid.store(Some(process.id()));
+        let lock = self.child_pid.lock().unwrap();
+        *lock.borrow_mut() = Some(process.id());
 
         let stdout = process.stdout.take().unwrap();
         let stdout_parser_thread = TranscodeHandler::new(self.id.clone(), stdout, process.id());
@@ -274,15 +275,15 @@ impl Session {
     }
 
     pub fn pause(&self) {
-        if let Some(x) = self.child_pid.load() {
-            crate::utils::pause_proc(x as i32);
+        if let Some(x) = self.child_pid.lock().unwrap().borrow_mut().as_mut() {
+            crate::utils::pause_proc(*x as i32);
             self.paused.store(true, SeqCst);
         }
     }
 
     pub fn cont(&self) {
-        if let Some(x) = self.child_pid.load() {
-            crate::utils::cont_proc(x as i32);
+        if let Some(x) = self.child_pid.lock().unwrap().borrow_mut().as_mut() {
+            crate::utils::cont_proc(*x as i32);
             self.paused.store(false, SeqCst);
         }
     }
@@ -369,7 +370,7 @@ impl Session {
         self.last_chunk.store(chunk, SeqCst);
         self.has_started.store(false, SeqCst);
         self.paused.store(true, SeqCst);
-        self.child_pid.take();
+        self.child_pid.lock().unwrap().borrow_mut().take();
     }
 }
 
