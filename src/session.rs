@@ -193,6 +193,8 @@ impl Session {
             string_to_static_str(format!("{}_init.mp4", self.start_num())),
         ]);
 
+        args.append(&mut vec!["-reset_timestamps", "1"]);
+
         args.append(&mut vec![
             "-hls_time",
             string_to_static_str(CHUNK_SIZE.to_string()),
