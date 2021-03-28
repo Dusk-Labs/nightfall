@@ -273,7 +273,7 @@ impl StateManager {
                     let chunk_path = session.chunk_to_path(chunk);
 
                     // hint that we should probably unpause ffmpeg for a bit
-                    if chunk >= session.current_chunk() - 2 {
+                    if chunk + 2 >= session.current_chunk() {
                         session.cont();
                     }
 

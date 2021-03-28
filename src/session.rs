@@ -13,6 +13,8 @@ use std::path::Path;
 use std::process::Child;
 use std::process::Command;
 use std::process::Stdio;
+use std::thread;
+use std::thread::JoinHandle;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -25,7 +27,6 @@ use std::sync::Mutex;
 use std::sync::RwLock;
 
 use crossbeam::atomic::AtomicCell;
-use stoppable_thread::{self, SimpleAtomicBool, StoppableHandle};
 
 /// Length of a chunk in seconds.
 const CHUNK_SIZE: u64 = 5;
@@ -47,7 +48,7 @@ pub struct Session {
     profile: Profile,
     outdir: String,
     ffmpeg_bin: String,
-    process: AtomicCell<Option<StoppableHandle<()>>>,
+    process: AtomicCell<Option<JoinHandle<()>>>,
 
     has_started: AtomicBool,
     pub paused: AtomicBool,
@@ -118,16 +119,14 @@ impl Session {
         *lock.borrow_mut() = Some(process.id());
 
         let stdout = process.stdout.take().unwrap();
-        let stdout_parser_thread = TranscodeHandler::new(self.id.clone(), stdout, process.id());
+        let stdout_parser_thread = StdoutParser::new(self.id.clone(), stdout, process.id());
 
         let lock = self.real_process.lock().unwrap();
         let mut proc_ref = lock.borrow_mut();
         *proc_ref = Some(process);
 
         self.process
-            .store(Some(stoppable_thread::spawn(move |signal| {
-                stdout_parser_thread.handle(signal)
-            })));
+            .store(Some(thread::spawn(move || stdout_parser_thread.handle())));
 
         Ok(())
     }
@@ -276,15 +275,25 @@ impl Session {
 
     pub fn pause(&self) {
         if let Some(x) = self.child_pid.lock().unwrap().borrow_mut().as_mut() {
-            crate::utils::pause_proc(*x as i32);
-            self.paused.store(true, SeqCst);
+            if self
+                .paused
+                .compare_exchange(false, true, SeqCst, SeqCst)
+                .is_ok()
+            {
+                crate::utils::pause_proc(*x as i32);
+            }
         }
     }
 
     pub fn cont(&self) {
         if let Some(x) = self.child_pid.lock().unwrap().borrow_mut().as_mut() {
-            crate::utils::cont_proc(*x as i32);
-            self.paused.store(false, SeqCst);
+            if self
+                .paused
+                .compare_exchange(true, false, SeqCst, SeqCst)
+                .is_ok()
+            {
+                crate::utils::cont_proc(*x as i32);
+            }
         }
     }
 
@@ -343,6 +352,13 @@ impl Session {
     }
 
     pub fn is_timeout(&self) -> bool {
+        // FIXME: im not exactly sure whats going on but at some point in a stream, usually halfway
+        // through the process for audio streams gets marked as unpaused yet its clearly paused in
+        // console.
+        if matches!(self.stream_type, StreamType::Audio(_)) {
+            return false;
+        }
+
         self.current_chunk() > self.last_chunk.load(SeqCst) + MAX_CHUNKS_AHEAD
     }
 
@@ -386,13 +402,13 @@ impl fmt::Debug for Session {
 
 use std::process::ChildStdout;
 
-struct TranscodeHandler {
+struct StdoutParser {
     id: String,
     process_stdout: ChildStdout,
     pid: u32,
 }
 
-impl TranscodeHandler {
+impl StdoutParser {
     fn new(id: String, process_stdout: ChildStdout, pid: u32) -> Self {
         Self {
             id,
@@ -401,13 +417,13 @@ impl TranscodeHandler {
         }
     }
 
-    fn handle(self, signal: &SimpleAtomicBool) {
+    fn handle(self) {
         let stdio = BufReader::new(self.process_stdout);
         let mut map: HashMap<String, String> = HashMap::new();
 
         let mut stdio_b = stdio.lines().peekable();
 
-        'stdout: while !signal.get() {
+        loop {
             while stdio_b.peek().is_some() {
                 let output = stdio_b.next().unwrap().unwrap();
                 let output: Vec<&str> = output.split('=').collect();
@@ -422,13 +438,11 @@ impl TranscodeHandler {
             }
 
             if crate::utils::is_process_effectively_dead(self.pid) {
-                break 'stdout;
+                break;
             }
 
             std::thread::sleep(Duration::from_millis(100));
         }
-
-        println!("Broken out of stdout loop, killing ffmpeg");
 
         let mut lock = STREAMING_SESSION.write().unwrap();
         let _ = lock.remove(&self.id);
