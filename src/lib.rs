@@ -55,8 +55,6 @@ use crate::error::*;
 use crate::profile::*;
 use crate::session::Session;
 
-use std::collections::VecDeque;
-
 use std::sync::atomic::Ordering::SeqCst;
 use std::sync::Arc;
 use std::sync::RwLock;
@@ -273,6 +271,12 @@ impl StateManager {
                     chan.send(Err(NightfallError::ChunkNotDone));
                 } else {
                     let chunk_path = session.chunk_to_path(chunk);
+
+                    // hint that we should probably unpause ffmpeg for a bit
+                    if chunk >= session.current_chunk() - 2 {
+                        session.cont();
+                    }
+
                     session.reset_timeout(chunk);
                     chan.send(Ok(chunk_path));
                 }
