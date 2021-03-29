@@ -290,6 +290,10 @@ impl StateManager {
             }
 
             if let OpCode::ShouldClientHardSeek { chunk, chan } = item {
+                if !session.has_started() {
+                    chan.send(Ok(false));
+                    continue;
+                }
                 // if we are seeking backwards we always want to restart the stream
                 // This is because our init.mp4 gets overwritten if we seeked forward at some point
                 // Furthermore we want to hard seek anyway if the player is browser based.
