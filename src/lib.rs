@@ -175,9 +175,9 @@ impl StateManager {
             cleaner: Arc::new(thread::spawn(move || loop {
                 map_clone.retain(|k, v| {
                     if v.is_hard_timeout() {
+                        exit_statuses_clone.insert(k.clone(), v.stderr().unwrap_or_default());
                         v.join();
                         v.delete_tmp();
-                        exit_statuses_clone.insert(k.clone(), v.stderr().unwrap_or_default());
                         return false;
                     } else if v.try_wait() {
                         exit_statuses_clone.insert(k.clone(), v.stderr().unwrap_or_default());
