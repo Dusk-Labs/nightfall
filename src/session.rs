@@ -283,13 +283,11 @@ impl Session {
 
     pub fn pause(&self) {
         if let Some(x) = self.child_pid.lock().unwrap().borrow_mut().as_mut() {
-            println!("trying to send sigstop");
             if self
                 .paused
                 .compare_exchange(false, true, SeqCst, SeqCst)
                 .is_ok()
             {
-                println!("sending sigstop");
                 crate::utils::pause_proc(*x as i32);
             }
         }
@@ -297,13 +295,11 @@ impl Session {
 
     pub fn cont(&self) {
         if let Some(x) = self.child_pid.lock().unwrap().borrow_mut().as_mut() {
-            println!("attempting to send sigcont");
             if self
                 .paused
                 .compare_exchange(true, false, SeqCst, SeqCst)
                 .is_ok()
             {
-                println!("sending sigcont");
                 crate::utils::cont_proc(*x as i32);
             }
         }
