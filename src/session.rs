@@ -18,6 +18,8 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 use std::time::Instant;
 
+use std::fs::File;
+
 use std::cell::RefCell;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU64;
@@ -98,14 +100,26 @@ impl Session {
         let _ = fs::create_dir_all(self.outdir.clone());
         let args = dbg!(self.build_args());
 
+        let log_file = format!("{}/ffmpeg.log", &self.outdir);
+
         // FIXME(Windows): For some reason if we dont tell rust to
         // use real stderr for ffmpeg instead of creating a new pipe
         // ffmpeg starts but it wont execute anything, it just idles.
         cfg_if::cfg_if! {
             if #[cfg(unix)] {
-                let stderr = Stdio::piped();
+                use std::os::unix::io::FromRawFd;
+                use std::os::unix::io::IntoRawFd;
+
+                let stderr = unsafe {
+                    Stdio::from_raw_fd(File::create(log_file)?.into_raw_fd())
+                };
             } else {
-                let stderr = Stdio::inherit();
+                use std::os::windows::io::FromRawHandle;
+                use std::os::windows::io::IntoRawHandle;
+
+                let stderr = unsafe {
+                    Stdio::from_raw_handle(File::create(log_file)?.into_raw_handle())
+                };
             }
         }
 
@@ -174,13 +188,7 @@ impl Session {
             }
         }
 
-        args.append(&mut vec![
-            "-copyts",
-            "-avoid_negative_ts",
-            "disabled",
-            "-max_muxing_queue_size",
-            "2048",
-        ]);
+        args.append(&mut vec!["-copyts", "-avoid_negative_ts", "disabled"]);
 
         args.append(&mut vec![
             "-f",
@@ -275,11 +283,13 @@ impl Session {
 
     pub fn pause(&self) {
         if let Some(x) = self.child_pid.lock().unwrap().borrow_mut().as_mut() {
+            println!("trying to send sigstop");
             if self
                 .paused
                 .compare_exchange(false, true, SeqCst, SeqCst)
                 .is_ok()
             {
+                println!("sending sigstop");
                 crate::utils::pause_proc(*x as i32);
             }
         }
@@ -287,11 +297,13 @@ impl Session {
 
     pub fn cont(&self) {
         if let Some(x) = self.child_pid.lock().unwrap().borrow_mut().as_mut() {
+            println!("attempting to send sigcont");
             if self
                 .paused
                 .compare_exchange(true, false, SeqCst, SeqCst)
                 .is_ok()
             {
+                println!("sending sigcont");
                 crate::utils::cont_proc(*x as i32);
             }
         }
@@ -352,13 +364,6 @@ impl Session {
     }
 
     pub fn is_timeout(&self) -> bool {
-        // FIXME: im not exactly sure whats going on but at some point in a stream, usually halfway
-        // through the process for audio streams gets marked as unpaused yet its clearly paused in
-        // console.
-        if matches!(self.stream_type, StreamType::Audio(_)) {
-            return false;
-        }
-
         self.current_chunk() > self.last_chunk.load(SeqCst) + MAX_CHUNKS_AHEAD
     }
 
