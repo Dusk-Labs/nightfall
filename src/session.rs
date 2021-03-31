@@ -160,6 +160,8 @@ impl Session {
             string_to_static_str((self.start_num() * CHUNK_SIZE).to_string()),
             "-i",
             self.file.as_str(),
+            "-threads",
+            "0",
         ];
 
         match self.stream_type {
@@ -174,8 +176,6 @@ impl Session {
                     "2",
                     "-ab",
                     "0",
-                    "-threads",
-                    "1",
                 ]);
             }
             StreamType::Video(stream) => {
@@ -188,7 +188,24 @@ impl Session {
             }
         }
 
-        args.append(&mut vec!["-copyts", "-avoid_negative_ts", "disabled"]);
+        // FIXME: These args cause system instability
+        // args.append(&mut vec!["-copyts", "-avoid_negative_ts", "disabled"]);
+        // args.append(&mut vec!["-initial_offset",
+        // string_to_static_str((self.start_num() * CHUNK_SIZE).to_string()),
+        //
+        // param might fix the issue where first seek in a session results in a invalid offset and
+        // timestamp.
+        // args.append(&mut vec!["-reset_timestamps", "1"]);
+
+        args.append(&mut vec![
+            "-start_at_zero",
+            "-vsync",
+            "-1",
+            "-avoid_negative_ts",
+            "disabled",
+            "-max_muxing_queue_size",
+            "2048",
+        ]);
 
         args.append(&mut vec![
             "-f",
@@ -201,7 +218,12 @@ impl Session {
         // on disk.
         // This in theory practically prevents the web server from returning a segment that is
         // in progress.
-        args.append(&mut vec!["-hls_flags", "temp_file"]);
+        args.append(&mut vec![
+            "-hls_flags",
+            "temp_file",
+            "-max_delay",
+            "5000000",
+        ]);
 
         // args needed so we can distinguish between init fragments for new streams.
         // Basically on the web seeking works by reloading the entire video because of
@@ -211,17 +233,11 @@ impl Session {
             string_to_static_str(format!("{}_init.mp4", self.start_num())),
         ]);
 
-        // param might fix the issue where first seek in a session results in a invalid offset and
-        // timestamp.
-        args.append(&mut vec!["-reset_timestamps", "1"]);
-
         args.append(&mut vec![
             "-hls_time",
             string_to_static_str(CHUNK_SIZE.to_string()),
-            "-initial_offset",
-            string_to_static_str((self.start_num() * CHUNK_SIZE).to_string()),
             "-force_key_frames",
-            "expr:gte(t,n_forced*5.00)",
+            "expr:if(isnan(prev_forced_t),eq(t,t),gte(t,prev_forced_t+5.00))",
         ]);
 
         args.append(&mut vec!["-hls_segment_type", "1"]);
