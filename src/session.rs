@@ -283,7 +283,7 @@ impl Session {
                 .get_key("frame")
                 .map(|x| x.parse::<u64>().unwrap_or(0))
                 .unwrap_or(0),
-            _ => todo!(),
+            _ => 0,
         } as u32;
 
         match self.stream_type {
