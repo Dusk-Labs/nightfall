@@ -1,6 +1,7 @@
 use crate::profile::Profile;
 use crate::profile::StreamType;
 
+use std::array::IntoIter;
 use std::collections::HashMap;
 use std::fmt;
 use std::fs;
@@ -22,7 +23,7 @@ use std::fs::File;
 
 use std::cell::RefCell;
 use std::sync::atomic::AtomicBool;
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::AtomicU32;
 use std::sync::atomic::Ordering::SeqCst;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -31,11 +32,11 @@ use std::sync::RwLock;
 use crossbeam::atomic::AtomicCell;
 
 /// Length of a chunk in seconds.
-const CHUNK_SIZE: u64 = 5;
+const CHUNK_SIZE: u32 = 5;
 /// Represents how many chunks we encode before we require a timeout reset.
 /// Basically if within MAX_CHUNKS_AHEAD we do not get a timeout reset we kill the stream.
 /// This can be tuned
-const MAX_CHUNKS_AHEAD: u64 = 15;
+const MAX_CHUNKS_AHEAD: u32 = 15;
 
 lazy_static::lazy_static! {
     /// This static contains stats about each stream. It is a Map of maps containing k/v pairs
@@ -47,16 +48,15 @@ lazy_static::lazy_static! {
 pub struct Session {
     pub id: String,
     file: String,
-    profile: Profile,
     outdir: String,
     ffmpeg_bin: String,
     process: AtomicCell<Option<JoinHandle<()>>>,
 
     has_started: AtomicBool,
     pub paused: AtomicBool,
-    pub start_number: AtomicU64,
+    pub start_number: AtomicU32,
     stream_type: StreamType,
-    last_chunk: AtomicU64,
+    last_chunk: AtomicU32,
     hard_timeout: AtomicCell<Instant>,
 
     child_pid: Arc<Mutex<RefCell<Option<u32>>>>,
@@ -67,8 +67,7 @@ impl Session {
     pub fn new(
         id: String,
         file: String,
-        profile: Profile,
-        start_number: u64,
+        start_number: u32,
         outdir: String,
         stream_type: StreamType,
         ffmpeg_bin: String,
@@ -78,11 +77,10 @@ impl Session {
         Self {
             id,
             outdir,
-            profile,
             ffmpeg_bin,
             stream_type,
-            start_number: AtomicU64::new(start_number),
-            last_chunk: AtomicU64::new(0),
+            start_number: AtomicU32::new(start_number),
+            last_chunk: AtomicU32::new(0),
             process: AtomicCell::new(None),
             paused: AtomicBool::new(false),
             has_started: AtomicBool::new(false),
@@ -145,111 +143,48 @@ impl Session {
         Ok(())
     }
 
-    pub fn start_num(&self) -> u64 {
+    pub fn start_num(&self) -> u32 {
         self.start_number.load(SeqCst)
     }
 
-    // FIXME: This entire subroutine will silently break streams that have non-standard sepcifications,
-    // such as fps that isnt 24
-    fn build_args(&self) -> Vec<&str> {
-        let mut args = vec![
+    fn build_args(&self) -> Vec<String> {
+        let mut args = IntoIter::new([
             "-fflags",
             "+genpts",
             "-y",
             "-ss",
-            string_to_static_str((self.start_num() * CHUNK_SIZE).to_string()),
+            (self.start_num() * CHUNK_SIZE).to_string().as_ref(),
             "-i",
             self.file.as_str(),
             "-threads",
             "0",
-        ];
+        ])
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
 
         match self.stream_type {
-            StreamType::Audio(stream) => {
+            StreamType::Audio { map, profile } => {
                 args.append(&mut vec![
-                    "-copyts",
-                    "-map",
-                    string_to_static_str(format!("0:{}", stream)),
-                    "-c:0",
-                    "aac",
-                    "-ac",
-                    "2",
-                    "-ab",
-                    "0",
+                    "-copyts".into(),
+                    "-map".into(),
+                    format!("0:{}", map).into(),
                 ]);
+                args.append(&mut profile.to_args(self.start_num(), &self.outdir));
             }
-            StreamType::Video(stream) => {
+            StreamType::Video { map, profile } => {
                 args.append(&mut vec![
-                    "-copyts",
-                    "-map",
-                    string_to_static_str(format!("0:{}", stream)),
+                    "-copyts".into(),
+                    "-map".into(),
+                    format!("0:{}", map),
                 ]);
-                args.append(&mut self.profile.to_params().0);
+                args.append(&mut profile.to_args(self.start_num(), &self.outdir));
+            }
+            StreamType::Subtitle { map, profile } => {
+                args.append(&mut vec!["-map".into(), format!("0:{}", map)]);
+
+                args.append(&mut profile.to_args(0, &self.outdir));
             }
         }
-
-        // FIXME: These args cause system instability
-        // args.append(&mut vec!["-copyts", "-avoid_negative_ts", "disabled"]);
-        // args.append(&mut vec!["-initial_offset",
-        // string_to_static_str((self.start_num() * CHUNK_SIZE).to_string()),
-        //
-        // param might fix the issue where first seek in a session results in a invalid offset and
-        // timestamp.
-        // args.append(&mut vec!["-reset_timestamps", "1"]);
-
-        args.append(&mut vec![
-            "-start_at_zero",
-            "-vsync",
-            "-1",
-            "-avoid_negative_ts",
-            "disabled",
-            "-max_muxing_queue_size",
-            "2048",
-        ]);
-
-        args.append(&mut vec![
-            "-f",
-            "hls",
-            "-start_number",
-            string_to_static_str(self.start_num().to_string()),
-        ]);
-
-        // needed so that in progress segments are named `tmp` and then renamed after the data is
-        // on disk.
-        // This in theory practically prevents the web server from returning a segment that is
-        // in progress.
-        args.append(&mut vec![
-            "-hls_flags",
-            "temp_file",
-            "-max_delay",
-            "5000000",
-        ]);
-
-        // args needed so we can distinguish between init fragments for new streams.
-        // Basically on the web seeking works by reloading the entire video because of
-        // discontinuity issues that browsers seem to not ignore like mpv.
-        args.append(&mut vec![
-            "-hls_fmp4_init_filename",
-            string_to_static_str(format!("{}_init.mp4", self.start_num())),
-        ]);
-
-        args.append(&mut vec![
-            "-hls_time",
-            string_to_static_str(CHUNK_SIZE.to_string()),
-            "-force_key_frames",
-            "expr:if(isnan(prev_forced_t),eq(t,t),gte(t,prev_forced_t+5.00))",
-        ]);
-
-        args.append(&mut vec!["-hls_segment_type", "1"]);
-        args.append(&mut vec!["-loglevel", "info", "-progress", "pipe:1"]);
-        args.append(&mut vec![
-            "-hls_segment_filename",
-            string_to_static_str(format!("{}/%d.m4s", self.outdir)),
-        ]);
-        args.append(&mut vec![string_to_static_str(format!(
-            "{}/playlist.m3u8",
-            self.outdir
-        ))]);
 
         args
     }
@@ -297,6 +232,14 @@ impl Session {
         fs::remove_dir_all(self.outdir.clone());
     }
 
+    pub fn is_dead(&self) -> bool {
+        if let Some(x) = self.child_pid.lock().unwrap().borrow().clone() {
+            return crate::utils::is_process_effectively_dead(x);
+        }
+
+        return true;
+    }
+
     pub fn pause(&self) {
         if let Some(x) = self.child_pid.lock().unwrap().borrow_mut().as_mut() {
             if self
@@ -326,9 +269,9 @@ impl Session {
         Ok(session.get(&self.id)?.get(k)?.clone())
     }
 
-    pub fn current_chunk(&self) -> u64 {
+    pub fn current_chunk(&self) -> u32 {
         let frame = match self.stream_type {
-            StreamType::Audio(_) => {
+            StreamType::Audio { .. } => {
                 self.get_key("out_time_us")
                     .map(|x| x.parse::<u64>().unwrap_or(0))
                     .unwrap_or(0)
@@ -336,15 +279,19 @@ impl Session {
                     / 1000
                     * 24
             }
-            StreamType::Video(_) => self
+            StreamType::Video { .. } => self
                 .get_key("frame")
                 .map(|x| x.parse::<u64>().unwrap_or(0))
                 .unwrap_or(0),
-        };
+            _ => todo!(),
+        } as u32;
 
         match self.stream_type {
-            StreamType::Audio(_) => (frame / (CHUNK_SIZE * 24)).max(self.last_chunk.load(SeqCst)),
-            StreamType::Video(_) => frame / (CHUNK_SIZE * 24) + self.start_num(),
+            StreamType::Audio { .. } => {
+                (frame / (CHUNK_SIZE * 24)).max(self.last_chunk.load(SeqCst))
+            }
+            StreamType::Video { .. } => frame / (CHUNK_SIZE * 24) + self.start_num(),
+            _ => todo!(),
         }
     }
 
@@ -360,7 +307,7 @@ impl Session {
         (self.raw_speed().floor().max(20.0) * 24.0) / (CHUNK_SIZE as f64 * 24.0)
     }
 
-    pub fn eta_for(&self, chunk: u64) -> Duration {
+    pub fn eta_for(&self, chunk: u32) -> Duration {
         let cps = self.speed();
 
         let current_chunk = self.current_chunk() as f64;
@@ -371,21 +318,36 @@ impl Session {
 
     /// Method does some math magic to guess if a chunk has been fully written by ffmpeg yet
     /// only works when `ffmpeg` writes files to tmp then renames them.
-    pub fn is_chunk_done(&self, chunk_num: u64) -> bool {
+    pub fn is_chunk_done(&self, chunk_num: u32) -> bool {
         Path::new(&format!("{}/{}.m4s", &self.outdir, chunk_num)).is_file()
+    }
+
+    pub fn subtitle(&self, file: String) -> Option<String> {
+        if !matches!(self.stream_type, StreamType::Subtitle { .. }) {
+            return None;
+        }
+
+        let file = format!("{}/{}", &self.outdir, file);
+        let path = Path::new(&file);
+
+        if path.is_file() && self.is_dead() {
+            return path.to_str().map(ToString::to_string);
+        }
+
+        None
     }
 
     pub fn is_timeout(&self) -> bool {
         self.current_chunk() > self.last_chunk.load(SeqCst) + MAX_CHUNKS_AHEAD
     }
 
-    pub fn reset_timeout(&self, last_requested: u64) {
+    pub fn reset_timeout(&self, last_requested: u32) {
         self.last_chunk.store(last_requested, SeqCst);
         self.hard_timeout
             .store(Instant::now() + Duration::from_secs(30 * 60));
     }
 
-    pub fn chunk_to_path(&self, chunk_num: u64) -> String {
+    pub fn chunk_to_path(&self, chunk_num: u32) -> String {
         format!("{}/{}.m4s", self.outdir, chunk_num)
     }
 
@@ -397,7 +359,7 @@ impl Session {
         self.has_started.load(SeqCst)
     }
 
-    pub fn reset_to(&self, chunk: u64) {
+    pub fn reset_to(&self, chunk: u32) {
         self.start_number.store(chunk, SeqCst);
         self.process.take();
         self.last_chunk.store(chunk, SeqCst);
@@ -464,8 +426,4 @@ impl StdoutParser {
         let mut lock = STREAMING_SESSION.write().unwrap();
         let _ = lock.remove(&self.id);
     }
-}
-
-fn string_to_static_str(s: String) -> &'static str {
-    Box::leak(s.into_boxed_str())
 }

@@ -37,7 +37,7 @@
 //! the ID is preserved.
 //!
 //! What happens if two chunks for the same stream are requested simulatenously??
-#![feature(try_trait, result_flattening)]
+#![feature(try_trait, result_flattening, array_value_iter)]
 #![allow(unused_must_use, dead_code)]
 
 /// Contains all the error types for this crate.
@@ -70,20 +70,21 @@ use dashmap::DashMap;
 
 /// Represents a operation that a route can dispatch to the state manager.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum OpCode {
     /// Represents a request for a init chunk.
     ChunkInitRequest {
-        chunk: u64,
+        chunk: u32,
         chan: Sender<Result<String>>,
     },
     /// This operation is used when a client has requested a chunk of a stream.
     ChunkRequest {
-        chunk: u64,
+        chunk: u32,
         chan: Sender<Result<String>>,
     },
     /// This operation is used to find out the ETA of a chunk.
     ChunkEta {
-        chunk: u64,
+        chunk: u32,
         chan: Sender<Result<u64>>,
     },
     /// Operation is used to determine whether the client should hard seek or not
@@ -92,13 +93,17 @@ pub enum OpCode {
     /// require the reload of a manifest to avoid the player freezing and entering a request next
     /// chunk loop.
     ShouldClientHardSeek {
-        chunk: u64,
+        chunk: u32,
         chan: Sender<Result<bool>>,
     },
     Die {
         chan: Sender<Result<()>>,
     },
     GetStderr {
+        chan: Sender<Result<String>>,
+    },
+    GetSub {
+        name: String,
         chan: Sender<Result<String>>,
     },
 }
@@ -125,7 +130,9 @@ impl OpCode {
             Self::GetStderr { chan, .. } => {
                 chan.send(msg);
             }
-            _ => {}
+            Self::GetSub { chan, .. } => {
+                chan.send(msg);
+            }
         }
     }
 }
@@ -327,6 +334,11 @@ impl StateManager {
                 continue;
             }
 
+            if let OpCode::GetSub { name, chan } = item {
+                chan.send(session.subtitle(name).ok_or(NightfallError::ChunkNotDone));
+                continue;
+            }
+
             if let OpCode::GetStderr { chan } = item {
                 chan.send(session.stderr().ok_or(NightfallError::Aborted));
             }
@@ -334,13 +346,12 @@ impl StateManager {
     }
 
     /// Function creates a stopped session returning an id.
-    pub fn create(&self, file: String, profile: Profile, stream_type: StreamType) -> String {
+    pub fn create(&self, file: String, stream_type: StreamType) -> String {
         let session_id = uuid::Uuid::new_v4().to_hyphenated().to_string();
 
         let new_session = Session::new(
             session_id.clone(),
             file,
-            profile,
             0,
             format!("{}/{}", self.outdir.clone(), session_id.clone()),
             stream_type,
@@ -352,7 +363,7 @@ impl StateManager {
         session_id
     }
 
-    fn init_create(&self, session_id: String) -> Sender<OpCode> {
+    pub fn init_create(&self, session_id: String) -> Sender<OpCode> {
         // first setup the session monitor
         let (session_tx, session_rx) = unbounded();
         let sessions = self.sessions.clone();
@@ -378,7 +389,7 @@ impl StateManager {
     }
 
     /// Try to get the init segment of a stream.
-    pub fn init_or_create(&self, session_id: String, first_chunk: u64) -> Result<String> {
+    pub fn init_or_create(&self, session_id: String, first_chunk: u32) -> Result<String> {
         let session_tx = if self
             .sessions
             .get(&session_id)
@@ -417,7 +428,7 @@ impl StateManager {
 
     /// Method takes in a session id and chunk and will block until the chunk requested is ready or
     /// until a timeout.
-    pub fn get_segment(&self, session_id: String, chunk: u64) -> Result<String> {
+    pub fn get_segment(&self, session_id: String, chunk: u32) -> Result<String> {
         let sender = self
             .chunk_requester
             .get(&session_id)
@@ -436,7 +447,7 @@ impl StateManager {
         Ok(())
     }
 
-    pub fn eta_for_seg(&self, session_id: String, chunk: u64) -> Result<u64> {
+    pub fn eta_for_seg(&self, session_id: String, chunk: u32) -> Result<u64> {
         let sender = self
             .chunk_requester
             .get(&session_id)
@@ -448,7 +459,7 @@ impl StateManager {
         rx.recv().map_err(|_| NightfallError::Aborted).flatten()
     }
 
-    pub fn should_client_hard_seek(&self, session_id: String, chunk: u64) -> Result<bool> {
+    pub fn should_client_hard_seek(&self, session_id: String, chunk: u32) -> Result<bool> {
         let sender = self
             .chunk_requester
             .get(&session_id)
@@ -488,6 +499,18 @@ impl StateManager {
 
         let (chan, rx) = unbounded();
         sender.send(OpCode::Die { chan });
+
+        rx.recv().map_err(|_| NightfallError::Aborted).flatten()
+    }
+
+    pub fn subtitle(&self, session_id: String, name: String) -> Result<String> {
+        let sender = self
+            .chunk_requester
+            .get(&session_id)
+            .ok_or(NightfallError::SessionDoesntExist)?;
+
+        let (chan, rx) = unbounded();
+        sender.send(OpCode::GetSub { name, chan });
 
         rx.recv().map_err(|_| NightfallError::Aborted).flatten()
     }

@@ -1,20 +1,35 @@
-#[derive(Debug, Eq, PartialEq, Clone, Copy)]
-pub enum StreamType {
-    Video(usize),
-    Audio(usize),
+pub trait Profile {
+    fn to_args(&self, start_num: u32, outdir: &str) -> Vec<String>;
 }
 
-#[derive(Clone, Copy)]
-pub enum Profile {
+#[derive(Debug, Eq, PartialEq, Clone, Copy)]
+pub enum StreamType {
+    Video {
+        map: usize,
+        profile: VideoProfile,
+    },
+    Audio {
+        map: usize,
+        profile: AudioProfile,
+    },
+    Subtitle {
+        map: usize,
+        profile: SubtitleProfile,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum VideoProfile {
+    /// Only transmuxes the stream, keeps the same resolution and bitrate
     Direct,
+    /// Transcodes the stream but keeps the native resolution and bitrate
     Native,
     High,
     Medium,
     Low,
-    Audio,
 }
 
-impl Profile {
+impl VideoProfile {
     pub fn to_params(&self) -> (Vec<&str>, &str) {
         match self {
             Self::Direct => (vec!["-c:0", "copy"], "direct"),
@@ -58,17 +73,160 @@ impl Profile {
                 ],
                 "1000kb",
             ),
-            Self::Audio => (vec![], "120kb"),
         }
     }
 
-    pub fn from_string<T: AsRef<str>>(profile: T) -> Result<Self, ()> {
-        Ok(match profile.as_ref() {
+    pub fn from_string<T: AsRef<str>>(profile: T) -> Option<Self> {
+        Some(match profile.as_ref() {
             "direct" => Self::Direct,
+            "native" => Self::Native,
             "5000kb" => Self::High,
             "2000kb" => Self::Medium,
             "1000kb" => Self::Low,
-            _ => return Err(()),
+            _ => return None,
         })
+    }
+}
+
+impl Profile for VideoProfile {
+    fn to_args(&self, start_num: u32, outdir: &str) -> Vec<String> {
+        let start_num = start_num.to_string();
+        let init_seg = format!("{}_init.mp4", &start_num);
+        let seg_name = format!("{}/%d.m4s", outdir);
+        let outdir = format!("{}/playlist.m3u8", outdir);
+
+        let mut args = vec![];
+
+        args.append(&mut vec![
+            "-start_at_zero",
+            "-vsync",
+            "-1",
+            "-avoid_negative_ts",
+            "disabled",
+            "-max_muxing_queue_size",
+            "2048",
+        ]);
+
+        args.append(&mut vec!["-f", "hls", "-start_number", &start_num]);
+
+        // needed so that in progress segments are named `tmp` and then renamed after the data is
+        // on disk.
+        // This in theory practically prevents the web server from returning a segment that is
+        // in progress.
+        args.append(&mut vec![
+            "-hls_flags",
+            "temp_file",
+            "-max_delay",
+            "5000000",
+        ]);
+
+        // args needed so we can distinguish between init fragments for new streams.
+        // Basically on the web seeking works by reloading the entire video because of
+        // discontinuity issues that browsers seem to not ignore like mpv.
+        args.append(&mut vec!["-hls_fmp4_init_filename", &init_seg]);
+
+        args.append(&mut vec![
+            "-hls_time",
+            "5",
+            "-force_key_frames",
+            "expr:if(isnan(prev_forced_t),eq(t,t),gte(t,prev_forced_t+5.00))",
+        ]);
+
+        args.append(&mut vec!["-hls_segment_type", "1"]);
+        args.append(&mut vec!["-loglevel", "info", "-progress", "pipe:1"]);
+        args.append(&mut vec!["-hls_segment_filename", &seg_name]);
+        args.append(&mut vec![&outdir]);
+
+        args.into_iter().map(ToString::to_string).collect()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AudioProfile {
+    Low,
+}
+
+impl AudioProfile {
+    pub fn to_params(&self) -> (Vec<&str>, &str) {
+        match self {
+            Self::Low => (vec![], "120kb"),
+        }
+    }
+
+    pub fn from_string<T: AsRef<str>>(profile: T) -> Option<Self> {
+        Some(match profile.as_ref() {
+            "120kb" => Self::Low,
+            _ => return None,
+        })
+    }
+}
+
+impl Profile for AudioProfile {
+    fn to_args(&self, start_num: u32, outdir: &str) -> Vec<String> {
+        let start_num = start_num.to_string();
+        let init_seg = format!("{}_init.mp4", &start_num);
+        let seg_name = format!("{}/%d.m4s", outdir);
+        let outdir = format!("{}/playlist.m3u8", outdir);
+
+        let mut args = vec![];
+
+        args.append(&mut vec![
+            "-start_at_zero",
+            "-vsync",
+            "-1",
+            "-avoid_negative_ts",
+            "disabled",
+            "-max_muxing_queue_size",
+            "2048",
+        ]);
+
+        args.append(&mut vec!["-f", "hls", "-start_number", &start_num]);
+
+        // needed so that in progress segments are named `tmp` and then renamed after the data is
+        // on disk.
+        // This in theory practically prevents the web server from returning a segment that is
+        // in progress.
+        args.append(&mut vec![
+            "-hls_flags",
+            "temp_file",
+            "-max_delay",
+            "5000000",
+        ]);
+
+        // args needed so we can distinguish between init fragments for new streams.
+        // Basically on the web seeking works by reloading the entire video because of
+        // discontinuity issues that browsers seem to not ignore like mpv.
+        args.append(&mut vec!["-hls_fmp4_init_filename", &init_seg]);
+
+        args.append(&mut vec![
+            "-hls_time",
+            "5",
+            "-force_key_frames",
+            "expr:if(isnan(prev_forced_t),eq(t,t),gte(t,prev_forced_t+5.00))",
+        ]);
+
+        args.append(&mut vec!["-hls_segment_type", "1"]);
+        args.append(&mut vec!["-loglevel", "info", "-progress", "pipe:1"]);
+        args.append(&mut vec!["-hls_segment_filename", &seg_name]);
+        args.append(&mut vec![&outdir]);
+
+        args.into_iter().map(ToString::to_string).collect()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SubtitleProfile {
+    Webvtt,
+}
+
+impl Profile for SubtitleProfile {
+    fn to_args(&self, _: u32, outdir: &str) -> Vec<String> {
+        let outdir = format!("{}/stream.vtt", outdir);
+
+        let mut args = vec![];
+
+        args.append(&mut vec!["-f", "webvtt", &outdir]);
+
+        args.into_iter().map(ToString::to_string).collect()
     }
 }
