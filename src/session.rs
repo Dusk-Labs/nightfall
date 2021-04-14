@@ -291,7 +291,7 @@ impl Session {
                 (frame / (CHUNK_SIZE * 24)).max(self.last_chunk.load(SeqCst))
             }
             StreamType::Video { .. } => frame / (CHUNK_SIZE * 24) + self.start_num(),
-            _ => todo!(),
+            _ => unreachable!(),
         }
     }
 
