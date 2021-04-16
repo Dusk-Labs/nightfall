@@ -95,7 +95,7 @@ impl Profile for VideoProfile {
         let seg_name = format!("{}/%d.m4s", outdir);
         let outdir = format!("{}/playlist.m3u8", outdir);
 
-        let mut args = vec![];
+        let mut args = self.to_params().0;
 
         args.append(&mut vec![
             "-start_at_zero",
@@ -149,7 +149,7 @@ pub enum AudioProfile {
 impl AudioProfile {
     pub fn to_params(&self) -> (Vec<&str>, &str) {
         match self {
-            Self::Low => (vec![], "120kb"),
+            Self::Low => (vec!["-c:0", "aac", "-ac", "2", "-ab", "120kb"], "120kb"),
         }
     }
 
@@ -168,7 +168,7 @@ impl Profile for AudioProfile {
         let seg_name = format!("{}/%d.m4s", outdir);
         let outdir = format!("{}/playlist.m3u8", outdir);
 
-        let mut args = vec![];
+        let mut args = self.to_params().0;
 
         args.append(&mut vec![
             "-start_at_zero",
