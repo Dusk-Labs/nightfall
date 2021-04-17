@@ -21,15 +21,8 @@ use std::time::Instant;
 
 use std::fs::File;
 
-use std::cell::RefCell;
-use std::sync::atomic::AtomicBool;
-use std::sync::atomic::AtomicU32;
-use std::sync::atomic::Ordering::SeqCst;
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::sync::RwLock;
-
-use crossbeam::atomic::AtomicCell;
 
 /// Length of a chunk in seconds.
 const CHUNK_SIZE: u32 = 5;
@@ -50,17 +43,17 @@ pub struct Session {
     file: String,
     outdir: String,
     ffmpeg_bin: String,
-    process: AtomicCell<Option<JoinHandle<()>>>,
+    process: Option<JoinHandle<()>>,
 
-    has_started: AtomicBool,
-    pub paused: AtomicBool,
-    pub start_number: AtomicU32,
+    has_started: bool,
+    pub paused: bool,
+    pub start_number: u32,
     stream_type: StreamType,
-    last_chunk: AtomicU32,
-    hard_timeout: AtomicCell<Instant>,
+    last_chunk: u32,
+    hard_timeout: Instant,
 
-    child_pid: Arc<Mutex<RefCell<Option<u32>>>>,
-    real_process: Arc<Mutex<RefCell<Option<Child>>>>,
+    child_pid: Option<u32>,
+    real_process: Option<Child>,
 }
 
 impl Session {
@@ -79,22 +72,23 @@ impl Session {
             outdir,
             ffmpeg_bin,
             stream_type,
-            start_number: AtomicU32::new(start_number),
-            last_chunk: AtomicU32::new(0),
-            process: AtomicCell::new(None),
-            paused: AtomicBool::new(false),
-            has_started: AtomicBool::new(false),
-            child_pid: Arc::new(Mutex::new(RefCell::new(None))),
-            real_process: Arc::new(Mutex::new(RefCell::new(None))),
-            hard_timeout: AtomicCell::new(Instant::now() + Duration::from_secs(30 * 60)),
+            start_number,
+            last_chunk: 0,
+            process: None,
+            paused: false,
+            has_started: false,
+            child_pid: None,
+            real_process: None,
+            hard_timeout: Instant::now() + Duration::from_secs(30 * 60),
             file,
         }
     }
 
-    pub fn start(&self) -> Result<(), io::Error> {
+    pub fn start(&mut self) -> Result<(), io::Error> {
         // make sure we actually have a path to write files to.
-        self.has_started.store(true, SeqCst);
-        self.paused.store(false, SeqCst);
+        self.has_started = true;
+        self.paused = false;
+
         let _ = fs::create_dir_all(self.outdir.clone());
         let args = dbg!(self.build_args());
 
@@ -127,24 +121,20 @@ impl Session {
             .args(args.as_slice())
             .spawn()?;
 
-        let lock = self.child_pid.lock().unwrap();
-        *lock.borrow_mut() = Some(process.id());
+        self.child_pid = Some(process.id());
 
         let stdout = process.stdout.take().unwrap();
         let stdout_parser_thread = StdoutParser::new(self.id.clone(), stdout, process.id());
 
-        let lock = self.real_process.lock().unwrap();
-        let mut proc_ref = lock.borrow_mut();
-        *proc_ref = Some(process);
+        self.real_process = Some(process);
 
-        self.process
-            .store(Some(thread::spawn(move || stdout_parser_thread.handle())));
+        self.process = Some(thread::spawn(move || stdout_parser_thread.handle()));
 
         Ok(())
     }
 
     pub fn start_num(&self) -> u32 {
-        self.start_number.load(SeqCst)
+        self.start_number
     }
 
     fn build_args(&self) -> Vec<String> {
@@ -189,14 +179,14 @@ impl Session {
         args
     }
 
-    pub fn join(&self) {
-        if let Some(x) = self.real_process.lock().unwrap().borrow_mut().as_mut() {
+    pub fn join(&mut self) {
+        if let Some(ref mut x) = self.real_process {
             x.kill();
             x.wait();
         }
     }
 
-    pub fn stderr(&self) -> Option<String> {
+    pub fn stderr(&mut self) -> Option<String> {
         let file = format!("{}/ffmpeg.log", &self.outdir);
 
         let mut buf = String::new();
@@ -209,8 +199,8 @@ impl Session {
         return Some(buf.split_off(buf.len() - 1000));
     }
 
-    pub fn try_wait(&self) -> bool {
-        if let Some(x) = self.real_process.lock().unwrap().borrow_mut().as_mut() {
+    pub fn try_wait(&mut self) -> bool {
+        if let Some(ref mut x) = self.real_process {
             if let Ok(Some(_)) = x.try_wait() {
                 x.wait();
                 return true;
@@ -220,12 +210,12 @@ impl Session {
         return false;
     }
 
-    pub fn is_hard_timeout(&self) -> bool {
-        Instant::now() > self.hard_timeout.load()
+    pub fn is_hard_timeout(&mut self) -> bool {
+        Instant::now() > self.hard_timeout
     }
 
-    pub fn set_timeout(&self) {
-        self.hard_timeout.store(Instant::now());
+    pub fn set_timeout(&mut self) {
+        self.hard_timeout = Instant::now();
     }
 
     pub fn delete_tmp(&self) {
@@ -233,33 +223,27 @@ impl Session {
     }
 
     pub fn is_dead(&self) -> bool {
-        if let Some(x) = self.child_pid.lock().unwrap().borrow().clone() {
+        if let Some(x) = self.child_pid {
             return crate::utils::is_process_effectively_dead(x);
         }
 
         return true;
     }
 
-    pub fn pause(&self) {
-        if let Some(x) = self.child_pid.lock().unwrap().borrow_mut().as_mut() {
-            if self
-                .paused
-                .compare_exchange(false, true, SeqCst, SeqCst)
-                .is_ok()
-            {
-                crate::utils::pause_proc(*x as i32);
+    pub fn pause(&mut self) {
+        if let Some(x) = self.child_pid {
+            if !self.paused {
+                crate::utils::pause_proc(x as i32);
+                self.paused = true;
             }
         }
     }
 
-    pub fn cont(&self) {
-        if let Some(x) = self.child_pid.lock().unwrap().borrow_mut().as_mut() {
-            if self
-                .paused
-                .compare_exchange(true, false, SeqCst, SeqCst)
-                .is_ok()
-            {
-                crate::utils::cont_proc(*x as i32);
+    pub fn cont(&mut self) {
+        if let Some(x) = self.child_pid {
+            if self.paused {
+                crate::utils::cont_proc(x as i32);
+                self.paused = false;
             }
         }
     }
@@ -287,10 +271,8 @@ impl Session {
         } as u32;
 
         match self.stream_type {
-            StreamType::Audio { .. } => {
-                (frame / (CHUNK_SIZE * 24)).max(self.last_chunk.load(SeqCst))
-            }
-            StreamType::Video { .. } => frame / (CHUNK_SIZE * 24) + self.start_num(),
+            StreamType::Audio { .. } => (frame / (CHUNK_SIZE * 24)).max(self.last_chunk),
+            StreamType::Video { .. } => frame / (CHUNK_SIZE * 24) + self.start_number,
             _ => unreachable!(),
         }
     }
@@ -338,13 +320,12 @@ impl Session {
     }
 
     pub fn is_timeout(&self) -> bool {
-        self.current_chunk() > self.last_chunk.load(SeqCst) + MAX_CHUNKS_AHEAD
+        self.current_chunk() > self.last_chunk + MAX_CHUNKS_AHEAD
     }
 
-    pub fn reset_timeout(&self, last_requested: u32) {
-        self.last_chunk.store(last_requested, SeqCst);
-        self.hard_timeout
-            .store(Instant::now() + Duration::from_secs(30 * 60));
+    pub fn reset_timeout(&mut self, last_requested: u32) {
+        self.last_chunk = last_requested;
+        self.hard_timeout = Instant::now() + Duration::from_secs(30 * 60);
     }
 
     pub fn chunk_to_path(&self, chunk_num: u32) -> String {
@@ -356,16 +337,16 @@ impl Session {
     }
 
     pub fn has_started(&self) -> bool {
-        self.has_started.load(SeqCst)
+        self.has_started
     }
 
-    pub fn reset_to(&self, chunk: u32) {
-        self.start_number.store(chunk, SeqCst);
-        self.process.take();
-        self.last_chunk.store(chunk, SeqCst);
-        self.has_started.store(false, SeqCst);
-        self.paused.store(true, SeqCst);
-        self.child_pid.lock().unwrap().borrow_mut().take();
+    pub fn reset_to(&mut self, chunk: u32) {
+        self.start_number = chunk;
+        self.process = None;
+        self.last_chunk = chunk;
+        self.has_started = false;
+        self.paused = true;
+        self.child_pid = None;
     }
 }
 
