@@ -76,7 +76,7 @@ impl Default for StreamStat {
     }
 }
 
-pub struct StateManagerv2 {
+pub struct StateManager {
     /// The directory where we store stream artifacts
     outdir: String,
     /// Path to a `ffmpeg` binary.
@@ -87,9 +87,9 @@ pub struct StateManagerv2 {
     stream_stats: HashMap<String, StreamStat>,
 }
 
-impl Actor for StateManagerv2 {}
+impl Actor for StateManager {}
 
-impl StateManagerv2 {
+impl StateManager {
     pub fn new(outdir: String, ffmpeg: String) -> Self {
         Self {
             outdir,
@@ -269,7 +269,7 @@ impl Message for StateCreate {
 }
 
 #[async_trait]
-impl Handler<StateCreate> for StateManagerv2 {
+impl Handler<StateCreate> for StateManager {
     async fn handle(&mut self, args: StateCreate, _: &mut Context<Self>) -> Result<String> {
         self.create(args.stream_type, args.file).await
     }
@@ -282,7 +282,7 @@ impl Message for ChunkInitRequest {
 }
 
 #[async_trait]
-impl Handler<ChunkInitRequest> for StateManagerv2 {
+impl Handler<ChunkInitRequest> for StateManager {
     async fn handle(&mut self, args: ChunkInitRequest, _: &mut Context<Self>) -> Result<String> {
         self.chunk_init_request(args.0, args.1).await
     }
@@ -295,7 +295,7 @@ impl Message for ChunkRequest {
 }
 
 #[async_trait]
-impl Handler<ChunkRequest> for StateManagerv2 {
+impl Handler<ChunkRequest> for StateManager {
     async fn handle(&mut self, args: ChunkRequest, _: &mut Context<Self>) -> Result<String> {
         self.chunk_request(args.0, args.1).await
     }
@@ -308,7 +308,7 @@ impl Message for ChunkEta {
 }
 
 #[async_trait]
-impl Handler<ChunkEta> for StateManagerv2 {
+impl Handler<ChunkEta> for StateManager {
     async fn handle(&mut self, args: ChunkEta, _: &mut Context<Self>) -> Result<u64> {
         self.chunk_eta(args.0, args.1).await
     }
@@ -321,7 +321,7 @@ impl Message for ShouldClientHardSeek {
 }
 
 #[async_trait]
-impl Handler<ShouldClientHardSeek> for StateManagerv2 {
+impl Handler<ShouldClientHardSeek> for StateManager {
     async fn handle(&mut self, args: ShouldClientHardSeek, _: &mut Context<Self>) -> Result<bool> {
         self.should_hard_seek(args.0, args.1).await
     }
@@ -334,7 +334,7 @@ impl Message for Die {
 }
 
 #[async_trait]
-impl Handler<Die> for StateManagerv2 {
+impl Handler<Die> for StateManager {
     async fn handle(&mut self, args: Die, _: &mut Context<Self>) -> Result<()> {
         self.die(args.0).await
     }
@@ -347,7 +347,7 @@ impl Message for GetSub {
 }
 
 #[async_trait]
-impl Handler<GetSub> for StateManagerv2 {
+impl Handler<GetSub> for StateManager {
     async fn handle(&mut self, args: GetSub, _: &mut Context<Self>) -> Result<String> {
         self.get_sub(args.0, args.1).await
     }
@@ -360,7 +360,7 @@ impl Message for GetStderr {
 }
 
 #[async_trait]
-impl Handler<GetStderr> for StateManagerv2 {
+impl Handler<GetStderr> for StateManager {
     async fn handle(&mut self, args: GetStderr, _: &mut Context<Self>) -> Result<String> {
         self.get_stderr(args.0).await
     }
