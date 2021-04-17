@@ -365,3 +365,36 @@ impl Handler<GetStderr> for StateManager {
         self.get_stderr(args.0).await
     }
 }
+
+pub struct GarbageCollect;
+
+impl Message for GarbageCollect {
+    type Result = ();
+}
+
+#[async_trait]
+impl Handler<GarbageCollect> for StateManager {
+    async fn handle(&mut self, _: GarbageCollect, _: &mut Context<Self>) {
+        fn collect(_: &String, session: &mut Session) -> bool {
+            if session.is_hard_timeout() {
+                // exit_statuses_clone.insert(k.clone(), v.stderr().unwrap_or_default());
+                session.join();
+                session.delete_tmp();
+                return false;
+            } else if session.try_wait() {
+                // exit_statuses_clone.insert(k.clone(), v.stderr().unwrap_or_default());
+                return true;
+            }
+
+            true
+        }
+
+        self.sessions.retain(collect);
+
+        for (_, v) in self.sessions.iter_mut() {
+            if v.is_timeout() && !v.paused && !v.try_wait() {
+                v.pause();
+            }
+        }
+    }
+}
