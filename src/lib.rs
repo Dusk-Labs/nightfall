@@ -37,7 +37,7 @@
 //! the ID is preserved.
 //!
 //! What happens if two chunks for the same stream are requested simulatenously??
-#![feature(try_trait, result_flattening, array_value_iter)]
+#![feature(try_trait, result_flattening, hash_drain_filter)]
 #![allow(unused_must_use, dead_code)]
 
 /// Contains all the error types for this crate.
@@ -85,6 +85,8 @@ pub struct StateManager {
     sessions: HashMap<String, Session>,
     /// Contains some useful stream stats
     stream_stats: HashMap<String, StreamStat>,
+    /// Contains the exit status of dead sessions
+    exit_statuses: HashMap<String, String>,
 }
 
 impl Actor for StateManager {}
@@ -96,6 +98,7 @@ impl StateManager {
             ffmpeg,
             sessions: HashMap::new(),
             stream_stats: HashMap::new(),
+            exit_statuses: HashMap::new(),
         }
     }
 
@@ -377,19 +380,23 @@ impl Handler<GarbageCollect> for StateManager {
     async fn handle(&mut self, _: GarbageCollect, _: &mut Context<Self>) {
         fn collect(_: &String, session: &mut Session) -> bool {
             if session.is_hard_timeout() {
-                // exit_statuses_clone.insert(k.clone(), v.stderr().unwrap_or_default());
-                session.join();
-                session.delete_tmp();
-                return false;
-            } else if session.try_wait() {
-                // exit_statuses_clone.insert(k.clone(), v.stderr().unwrap_or_default());
                 return true;
+            } else if session.try_wait() {
+                // FIXME: If a session dies naturally, do we still copy over stderr?
+                // self.exit_statuses.insert(k.clone(), v.stderr().unwrap_or_default());
+                return false;
             }
 
-            true
+            false
         }
 
-        self.sessions.retain(collect);
+        let mut to_reap: HashMap<_, _> = self.sessions.drain_filter(collect).collect();
+
+        for (k, v) in to_reap.iter_mut() {
+            self.exit_statuses.insert(k.clone(), v.stderr().unwrap_or_default());
+            v.join();
+            v.delete_tmp();
+        }
 
         for (_, v) in self.sessions.iter_mut() {
             if v.is_timeout() && !v.paused && !v.try_wait() {
