@@ -90,7 +90,7 @@ impl Session {
         self.paused = false;
 
         let _ = fs::create_dir_all(self.outdir.clone());
-        let args = dbg!(self.build_args());
+        let args = self.build_args();
 
         let log_file = format!("{}/ffmpeg.log", &self.outdir);
 
@@ -273,7 +273,7 @@ impl Session {
         match self.stream_type {
             StreamType::Audio { .. } => (frame / (CHUNK_SIZE * 24)).max(self.last_chunk),
             StreamType::Video { .. } => frame / (CHUNK_SIZE * 24) + self.start_number,
-            _ => unreachable!(),
+            _ => 0,
         }
     }
 

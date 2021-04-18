@@ -62,6 +62,8 @@ use xtra::*;
 use std::collections::HashMap;
 use async_trait::async_trait;
 
+use slog::info;
+
 struct StreamStat {
     hard_seeked_at: u32,
     last_hard_seek: Instant,
@@ -87,15 +89,18 @@ pub struct StateManager {
     stream_stats: HashMap<String, StreamStat>,
     /// Contains the exit status of dead sessions
     exit_statuses: HashMap<String, String>,
+    /// Logger
+    logger: slog::Logger,
 }
 
 impl Actor for StateManager {}
 
 impl StateManager {
-    pub fn new(outdir: String, ffmpeg: String) -> Self {
+    pub fn new(outdir: String, ffmpeg: String, logger: slog::Logger) -> Self {
         Self {
             outdir,
             ffmpeg,
+            logger,
             sessions: HashMap::new(),
             stream_stats: HashMap::new(),
             exit_statuses: HashMap::new(),
@@ -115,6 +120,8 @@ impl StateManager {
         );
 
         self.sessions.insert(session_id.clone(), new_session);
+
+        info!(self.logger, "New session {} ({})", &session_id, stream_type);
 
         Ok(session_id)
     }
@@ -392,16 +399,26 @@ impl Handler<GarbageCollect> for StateManager {
 
         let mut to_reap: HashMap<_, _> = self.sessions.drain_filter(collect).collect();
 
+        if !to_reap.is_empty() {
+            info!(self.logger, "Reaping {} streams", to_reap.len());
+        }
+
         for (k, v) in to_reap.iter_mut() {
             self.exit_statuses.insert(k.clone(), v.stderr().unwrap_or_default());
             v.join();
             v.delete_tmp();
         }
 
+        let mut cnt = 0;
         for (_, v) in self.sessions.iter_mut() {
             if v.is_timeout() && !v.paused && !v.try_wait() {
                 v.pause();
+                cnt += 1;
             }
+        }
+
+        if cnt != 0 {
+            info!(self.logger, "Paused {} streams", cnt);
         }
     }
 }
