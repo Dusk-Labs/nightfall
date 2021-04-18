@@ -141,7 +141,7 @@ impl StateManager {
         }
         
         if session.is_chunk_done(chunk) {
-            return Ok(session.chunk_to_path(chunk));
+            return Ok(session.init_seg());
         }
 
         Err(NightfallError::ChunkNotDone)
@@ -263,8 +263,8 @@ impl StateManager {
 }
 
 pub struct StateCreate {
-    stream_type: StreamType,
-    file: String
+    pub stream_type: StreamType,
+    pub file: String
 }
 
 impl Message for StateCreate {
@@ -278,7 +278,7 @@ impl Handler<StateCreate> for StateManager {
     }
 }
 
-pub struct ChunkInitRequest(String, u32);
+pub struct ChunkInitRequest(pub String, pub u32);
 
 impl Message for ChunkInitRequest {
     type Result = Result<String>;
@@ -291,7 +291,7 @@ impl Handler<ChunkInitRequest> for StateManager {
     }
 }
 
-pub struct ChunkRequest(String, u32);
+pub struct ChunkRequest(pub String, pub u32);
 
 impl Message for ChunkRequest {
     type Result = Result<String>;
@@ -304,7 +304,7 @@ impl Handler<ChunkRequest> for StateManager {
     }
 }
 
-pub struct ChunkEta(String, u32);
+pub struct ChunkEta(pub String, pub u32);
 
 impl Message for ChunkEta {
     type Result = Result<u64>;
@@ -317,7 +317,7 @@ impl Handler<ChunkEta> for StateManager {
     }
 }
 
-pub struct ShouldClientHardSeek(String, u32);
+pub struct ShouldClientHardSeek(pub String, pub u32);
 
 impl Message for ShouldClientHardSeek {
     type Result = Result<bool>;
@@ -330,7 +330,7 @@ impl Handler<ShouldClientHardSeek> for StateManager {
     }
 }
 
-pub struct Die(String);
+pub struct Die(pub String);
 
 impl Message for Die {
     type Result = Result<()>;
@@ -343,7 +343,7 @@ impl Handler<Die> for StateManager {
     }
 }
 
-pub struct GetSub(String, String);
+pub struct GetSub(pub String, pub String);
 
 impl Message for GetSub {
     type Result = Result<String>;
@@ -356,7 +356,7 @@ impl Handler<GetSub> for StateManager {
     }
 }
 
-pub struct GetStderr(String);
+pub struct GetStderr(pub String);
 
 impl Message for GetStderr {
     type Result = Result<String>;
