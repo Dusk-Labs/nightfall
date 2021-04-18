@@ -58,13 +58,14 @@ use crate::session::Session;
 use std::time::Duration;
 use std::time::Instant;
 
-use xtra::*;
+use xtra_proc::actor;
+use xtra_proc::handler;
 use std::collections::HashMap;
 use async_trait::async_trait;
 
 use slog::info;
 
-struct StreamStat {
+pub struct StreamStat {
     hard_seeked_at: u32,
     last_hard_seek: Instant,
 }
@@ -78,23 +79,24 @@ impl Default for StreamStat {
     }
 }
 
+#[actor]
 pub struct StateManager {
     /// The directory where we store stream artifacts
-    outdir: String,
+    pub outdir: String,
     /// Path to a `ffmpeg` binary.
-    ffmpeg: String,
+    pub ffmpeg: String,
     /// Contains all of the sessions currently managed by this actor.
-    sessions: HashMap<String, Session>,
+    pub sessions: HashMap<String, Session>,
     /// Contains some useful stream stats
-    stream_stats: HashMap<String, StreamStat>,
+    pub stream_stats: HashMap<String, StreamStat>,
     /// Contains the exit status of dead sessions
-    exit_statuses: HashMap<String, String>,
+    pub exit_statuses: HashMap<String, String>,
     /// Logger
-    logger: slog::Logger,
+    pub logger: slog::Logger,
 }
 
-impl Actor for StateManager {}
 
+#[actor]
 impl StateManager {
     pub fn new(outdir: String, ffmpeg: String, logger: slog::Logger) -> Self {
         Self {
@@ -107,6 +109,7 @@ impl StateManager {
         }
     }
 
+    #[handler]
     async fn create(&mut self, stream_type: StreamType, file: String) -> Result<String> {
         let session_id = uuid::Uuid::new_v4().to_hyphenated().to_string();
 
@@ -126,6 +129,7 @@ impl StateManager {
         Ok(session_id)
     }
 
+    #[handler]
     async fn chunk_init_request(&mut self, id: String, chunk: u32) -> Result<String> {
         let session = self.sessions.get_mut(&id).ok_or(NightfallError::SessionDoesntExist)?;
 
@@ -154,6 +158,7 @@ impl StateManager {
         Err(NightfallError::ChunkNotDone)
     }
 
+    #[handler]
     async fn chunk_request(&mut self, id: String, chunk: u32) -> Result<String> {
         let session = self.sessions.get_mut(&id).ok_or(NightfallError::SessionDoesntExist)?;
         let stats = self.stream_stats.entry(id).or_default();
@@ -202,11 +207,13 @@ impl StateManager {
         }
     }
 
+    #[handler]
     async fn chunk_eta(&mut self, id: String, chunk: u32) -> Result<u64> {
         let session = self.sessions.get_mut(&id).ok_or(NightfallError::SessionDoesntExist)?;
         Ok(session.eta_for(chunk).as_secs())
     }
 
+    #[handler]
     async fn should_hard_seek(&mut self, id: String, chunk: u32) -> Result<bool> {
         let session = self.sessions.get_mut(&id).ok_or(NightfallError::SessionDoesntExist)?;
         let stats = self.stream_stats.entry(id).or_default();
@@ -236,6 +243,7 @@ impl StateManager {
            > (10_000.0 / session.raw_speed()).max(5_000.0))
     }
 
+    #[handler]
     async fn die(&mut self, id: String) -> Result<()> {
         let session = self.sessions.get_mut(&id).ok_or(NightfallError::SessionDoesntExist)?;
         session.join();
@@ -244,6 +252,7 @@ impl StateManager {
         Ok(())
     }
 
+    #[handler]
     async fn get_sub(&mut self, id: String, name: String) -> Result<String> {
         let session = self.sessions.get_mut(&id).ok_or(NightfallError::SessionDoesntExist)?;
 
@@ -254,6 +263,7 @@ impl StateManager {
         session.subtitle(name).ok_or(NightfallError::ChunkNotDone)
     }
 
+    #[handler]
     async fn get_stderr(&mut self, id: String) -> Result<String> {
         let session = self.sessions.get_mut(&id).ok_or(NightfallError::SessionDoesntExist)?;
         // FIXME: Return status if no stderr exists
@@ -267,124 +277,9 @@ impl StateManager {
         */
         session.stderr().ok_or(NightfallError::Aborted)
     }
-}
 
-pub struct StateCreate {
-    pub stream_type: StreamType,
-    pub file: String
-}
-
-impl Message for StateCreate {
-    type Result = Result<String>;
-}
-
-#[async_trait]
-impl Handler<StateCreate> for StateManager {
-    async fn handle(&mut self, args: StateCreate, _: &mut Context<Self>) -> Result<String> {
-        self.create(args.stream_type, args.file).await
-    }
-}
-
-pub struct ChunkInitRequest(pub String, pub u32);
-
-impl Message for ChunkInitRequest {
-    type Result = Result<String>;
-}
-
-#[async_trait]
-impl Handler<ChunkInitRequest> for StateManager {
-    async fn handle(&mut self, args: ChunkInitRequest, _: &mut Context<Self>) -> Result<String> {
-        self.chunk_init_request(args.0, args.1).await
-    }
-}
-
-pub struct ChunkRequest(pub String, pub u32);
-
-impl Message for ChunkRequest {
-    type Result = Result<String>;
-}
-
-#[async_trait]
-impl Handler<ChunkRequest> for StateManager {
-    async fn handle(&mut self, args: ChunkRequest, _: &mut Context<Self>) -> Result<String> {
-        self.chunk_request(args.0, args.1).await
-    }
-}
-
-pub struct ChunkEta(pub String, pub u32);
-
-impl Message for ChunkEta {
-    type Result = Result<u64>;
-}
-
-#[async_trait]
-impl Handler<ChunkEta> for StateManager {
-    async fn handle(&mut self, args: ChunkEta, _: &mut Context<Self>) -> Result<u64> {
-        self.chunk_eta(args.0, args.1).await
-    }
-}
-
-pub struct ShouldClientHardSeek(pub String, pub u32);
-
-impl Message for ShouldClientHardSeek {
-    type Result = Result<bool>;
-}
-
-#[async_trait]
-impl Handler<ShouldClientHardSeek> for StateManager {
-    async fn handle(&mut self, args: ShouldClientHardSeek, _: &mut Context<Self>) -> Result<bool> {
-        self.should_hard_seek(args.0, args.1).await
-    }
-}
-
-pub struct Die(pub String);
-
-impl Message for Die {
-    type Result = Result<()>;
-}
-
-#[async_trait]
-impl Handler<Die> for StateManager {
-    async fn handle(&mut self, args: Die, _: &mut Context<Self>) -> Result<()> {
-        self.die(args.0).await
-    }
-}
-
-pub struct GetSub(pub String, pub String);
-
-impl Message for GetSub {
-    type Result = Result<String>;
-}
-
-#[async_trait]
-impl Handler<GetSub> for StateManager {
-    async fn handle(&mut self, args: GetSub, _: &mut Context<Self>) -> Result<String> {
-        self.get_sub(args.0, args.1).await
-    }
-}
-
-pub struct GetStderr(pub String);
-
-impl Message for GetStderr {
-    type Result = Result<String>;
-}
-
-#[async_trait]
-impl Handler<GetStderr> for StateManager {
-    async fn handle(&mut self, args: GetStderr, _: &mut Context<Self>) -> Result<String> {
-        self.get_stderr(args.0).await
-    }
-}
-
-pub struct GarbageCollect;
-
-impl Message for GarbageCollect {
-    type Result = ();
-}
-
-#[async_trait]
-impl Handler<GarbageCollect> for StateManager {
-    async fn handle(&mut self, _: GarbageCollect, _: &mut Context<Self>) {
+    #[handler]
+    async fn garbage_collect(&mut self) -> Result<()> {
         fn collect(_: &String, session: &mut Session) -> bool {
             if session.is_hard_timeout() {
                 return true;
@@ -420,5 +315,7 @@ impl Handler<GarbageCollect> for StateManager {
         if cnt != 0 {
             info!(self.logger, "Paused {} streams", cnt);
         }
+
+        Ok(())
     }
 }

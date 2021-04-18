@@ -17,6 +17,7 @@ err-derive = "0.3.0"
 xtra = "0.5.1"
 async-trait = "0.1.49"
 slog = "2.7.0"
+xtra_proc = { git = "https://github.com/vgarleanu/xtra_proc" }
 
 [target.'cfg(unix)'.dependencies]
 nix = "0.20.0"
