@@ -7,17 +7,17 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-dashmap = "=4.0.2"
 uuid = { version = "0.8.1", features = ["v4"] }
-stoppable_thread = "0.2.1"
 lazy_static = "1.4.0"
 serde_json = "1.0.57"
 serde = { version = "1.0.115", features = ["derive"] }
 serde_derive = "1.0.115"
-crossbeam = "0.8.0"
-crossbeam-queue = "0.3.1"
 cfg-if = "1.0.0"
 err-derive = "0.3.0"
+xtra = "0.5.1"
+async-trait = "0.1.49"
+slog = "2.7.0"
+xtra_proc = { git = "https://github.com/vgarleanu/xtra_proc" }
 
 [target.'cfg(unix)'.dependencies]
 nix = "0.20.0"

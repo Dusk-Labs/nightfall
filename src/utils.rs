@@ -17,8 +17,9 @@ cfg_if::cfg_if! {
             let process = psutil::process::Process::new(pid);
 
             if let Ok(process) = process {
-                match process.status().unwrap() {
-                    Zombie | Dead =>  true,
+                // TODO: sometimes this unwrap will panic.
+                match process.status() {
+                    Ok(Zombie | Dead) =>  true,
                     _ =>  false
                 }
             } else {
@@ -41,7 +42,7 @@ cfg_if::cfg_if! {
         pub fn pause_proc(pid: i32) {
             unsafe {
                 let process_handle = OpenProcess(PROCESS_ALL_ACCESS, 0, pid as u32);
-                
+
                 if process_handle == NULL {
                     return;
                 }
@@ -53,7 +54,7 @@ cfg_if::cfg_if! {
         pub fn cont_proc(pid: i32) {
             unsafe {
                 let process_handle = OpenProcess(PROCESS_ALL_ACCESS, 0, pid as u32);
-                
+
                 if process_handle == NULL {
                     return;
                 }

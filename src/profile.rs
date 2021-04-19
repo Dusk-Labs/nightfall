@@ -1,3 +1,5 @@
+use std::fmt;
+
 pub trait Profile {
     fn to_args(&self, start_num: u32, outdir: &str) -> Vec<String>;
 }
@@ -16,6 +18,31 @@ pub enum StreamType {
         map: usize,
         profile: SubtitleProfile,
     },
+}
+
+impl StreamType {
+    pub fn map(&self) -> usize {
+        match self {
+            Self::Video { map, .. } => *map,
+            Self::Audio { map, .. } => *map,
+            Self::Subtitle { map, .. } => *map,
+        }
+    }
+}
+
+impl fmt::Display for StreamType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "map {} -> {}",
+            self.map().to_string(),
+            match self {
+                Self::Video { profile, .. } => profile.to_string(),
+                Self::Audio { profile, .. } => profile.to_string(),
+                Self::Subtitle { profile, .. } => profile.to_string(),
+            }
+        )
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -85,6 +112,22 @@ impl VideoProfile {
             "1000kb" => Self::Low,
             _ => return None,
         })
+    }
+}
+
+impl fmt::Display for VideoProfile {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Self::Direct => "copy",
+                Self::Native => "h264@native",
+                Self::High => "h264@5000kb",
+                Self::Medium => "h264@2000kb",
+                Self::Low => "h264@1000kb",
+            }
+        )
     }
 }
 
@@ -161,6 +204,12 @@ impl AudioProfile {
     }
 }
 
+impl fmt::Display for AudioProfile {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "aac@128kb")
+    }
+}
+
 impl Profile for AudioProfile {
     fn to_args(&self, start_num: u32, outdir: &str) -> Vec<String> {
         let start_num = start_num.to_string();
@@ -217,6 +266,12 @@ impl Profile for AudioProfile {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SubtitleProfile {
     Webvtt,
+}
+
+impl fmt::Display for SubtitleProfile {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "vtt")
+    }
 }
 
 impl Profile for SubtitleProfile {
