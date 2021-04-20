@@ -168,12 +168,16 @@ impl Profile for VideoProfile {
         // discontinuity issues that browsers seem to not ignore like mpv.
         args.append(&mut vec!["-hls_fmp4_init_filename", &init_seg]);
 
-        args.append(&mut vec![
-            "-hls_time",
-            "5",
-            "-force_key_frames",
-            "expr:if(isnan(prev_forced_t),eq(t,t),gte(t,prev_forced_t+5.00))",
-        ]);
+        args.append(&mut vec!["-hls_time", "5"]);
+
+        // NOTE: I dont think we need to force key frames if we are not transcoding
+        match self {
+            Self::Direct => {}
+            _ => args.append(&mut vec![
+                "-force_key_frames",
+                "expr:if(isnan(prev_forced_t),eq(t,t),gte(t,prev_forced_t+5.00))",
+            ]),
+        }
 
         args.append(&mut vec!["-hls_segment_type", "1"]);
         args.append(&mut vec!["-loglevel", "info", "-progress", "pipe:1"]);

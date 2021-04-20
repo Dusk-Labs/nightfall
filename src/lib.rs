@@ -246,6 +246,7 @@ impl StateManager {
     #[handler]
     async fn die(&mut self, id: String) -> Result<()> {
         let session = self.sessions.get_mut(&id).ok_or(NightfallError::SessionDoesntExist)?;
+        info!(self.logger, "Killing session {}", id);
         session.join();
         session.set_timeout();
         
@@ -265,16 +266,8 @@ impl StateManager {
 
     #[handler]
     async fn get_stderr(&mut self, id: String) -> Result<String> {
+        // TODO: Move this out of here, instead we should just return the log file.
         let session = self.sessions.get_mut(&id).ok_or(NightfallError::SessionDoesntExist)?;
-        // FIXME: Return status if no stderr exists
-        /*
-          .or_else(|_| {
-              self.exit_statuses
-                  .get(&session_id)
-                  .map(|x| x.value().clone())
-                  .ok_or(NightfallError::Aborted)
-           })
-        */
         session.stderr().ok_or(NightfallError::Aborted)
     }
 
@@ -284,8 +277,6 @@ impl StateManager {
             if session.is_hard_timeout() {
                 return true;
             } else if session.try_wait() {
-                // FIXME: If a session dies naturally, do we still copy over stderr?
-                // self.exit_statuses.insert(k.clone(), v.stderr().unwrap_or_default());
                 return false;
             }
 
