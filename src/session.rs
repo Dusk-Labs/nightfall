@@ -312,7 +312,8 @@ impl Session {
         let file = format!("{}/{}", &self.outdir, file);
         let path = Path::new(&file);
 
-        if path.is_file() && self.is_dead() {
+        // NOTE: This will not check if the ffmpeg process is dead, thus this will return immediately
+        if path.is_file() {
             return path.to_str().map(ToString::to_string);
         }
 

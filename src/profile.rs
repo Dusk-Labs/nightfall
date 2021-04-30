@@ -143,7 +143,7 @@ impl Profile for VideoProfile {
         args.append(&mut vec![
             "-start_at_zero",
             "-vsync",
-            "-1",
+            "passthrough",
             "-avoid_negative_ts",
             "disabled",
             "-max_muxing_queue_size",
