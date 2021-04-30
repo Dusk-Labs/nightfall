@@ -279,12 +279,11 @@ impl fmt::Display for SubtitleProfile {
 }
 
 impl Profile for SubtitleProfile {
-    fn to_args(&self, _: u32, outdir: &str) -> Vec<String> {
-        let outdir = format!("{}/stream.vtt", outdir);
-
+    fn to_args(&self, _: u32, _: &str) -> Vec<String> {
         let mut args = vec![];
 
-        args.append(&mut vec!["-f", "webvtt", &outdir]);
+        // we want to stream subtitles, thus we pipe its output to stdout and then we flush it to disk manually
+        args.append(&mut vec!["-f", "webvtt", "-"]);
 
         args.into_iter().map(ToString::to_string).collect()
     }

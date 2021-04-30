@@ -94,29 +94,15 @@ impl Session {
 
         let log_file = format!("{}/ffmpeg.log", &self.outdir);
 
-        // FIXME(Windows): For some reason if we dont tell rust to
-        // use real stderr for ffmpeg instead of creating a new pipe
-        // ffmpeg starts but it wont execute anything, it just idles.
-        cfg_if::cfg_if! {
-            if #[cfg(unix)] {
-                use std::os::unix::io::FromRawFd;
-                use std::os::unix::io::IntoRawFd;
-
-                let stderr = unsafe {
-                    Stdio::from_raw_fd(File::create(log_file)?.into_raw_fd())
-                };
-            } else {
-                use std::os::windows::io::FromRawHandle;
-                use std::os::windows::io::IntoRawHandle;
-
-                let stderr = unsafe {
-                    Stdio::from_raw_handle(File::create(log_file)?.into_raw_handle())
-                };
-            }
-        }
+        let stderr: Stdio = File::create(log_file)?.into();
+        let stdout: Stdio = if let StreamType::Subtitle { .. } = self.stream_type {
+            File::create(format!("{}/stream.vtt", &self.outdir))?.into()
+        } else {
+            Stdio::piped()
+        };
 
         let mut process = Command::new(self.ffmpeg_bin.clone())
-            .stdout(Stdio::piped())
+            .stdout(stdout)
             .stderr(stderr)
             .args(args.as_slice())
             .spawn()?;
