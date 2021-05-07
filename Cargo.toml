@@ -3,6 +3,9 @@ name = "nightfall"
 version = "0.1.0"
 authors = ["Valerian G. <valerian.garleanu@pm.me>"]
 edition = "2018"
+license = "GPL-2.0"
+description = "Nightfall is a library allowing on-demand video transcoding and streaming."
+repository = "https://github.com/vgarleanu/nightfall"
 
 [dependencies]
 uuid = { version = "0.8.1", features = ["v4"] }
