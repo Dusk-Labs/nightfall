@@ -25,5 +25,5 @@ nix = "0.20.0"
 psutil = "3.2.0"
 
 [target.'cfg(windows)'.dependencies]
-winapi = { version = "*", features = ["winerror", "synchapi", "minwinbase"] }
-ntapi = "*"
+winapi = { version = "^0.3.9", features = ["winerror", "synchapi", "minwinbase"] }
+ntapi = "^0.3.6"
