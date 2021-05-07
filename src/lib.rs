@@ -1,43 +1,5 @@
-//! Nightfall - Hackers streaming lib.
-//!
-//! # Whats this?
-//! Nightfall is a implementation of on-demand video streaming and transcoding. Unlike other
-//! implementations, this lib has support for seamless and cheap seeking. It requires
-//! nothing but for `ffmpeg` and `ffprobe` to exist on the system it runs on.
-//!
-//! # How does it work?
-//! The implementation is quite hacky and involves abusing dash manifests. All the logic
-//! essentially boils down to two mechanics
-//!
-//! # Manifest Generation
-//! Generating mpeg-dash manifest that doesnt have hardcoded chunk ranges in (sorta like a
-//! live-manifest). The player thus assumes that all chunks are exactly n-seconds long thus it
-//! can just keep requesting the next chunk until we 404.
-//!
-//! # Transcoding chunks on-demand
-//! Transcoding chunks on-demand. Once a player requests the next chunk in a video stream we get
-//! that request, we do a lookup to see if that chunk exists and has been completely written
-//! (this is to avoid data races and crashes). If it exists we return the absolute path to the
-//! chunk, otherwise we return a None.
-//!    
-//! Of course this logic is quite brittle, thus we introduce timeouts. If after x seconds the
-//! chunk hasnt finished transcoding we kill the previous process and start a new one with a
-//! offset of the chunk we want.
-//!    
-//! This does mainly one thing for us. It allows us to seek anywhere in a video without having to
-//! wait for the rest of the video to transcode.
-//!
-//! # Caveats
-//! The overhead of this is quite big at the moment (dont quote me on this), thus players have to
-//! have lean request timeouts as in some cases spawning and killing ffmpeg processes when seeking
-//! around could turn out to be slow.
-//!
-//! # Notes
-//! Each track in a manifest is unique, thus they get unique ids. When seeking in the current track
-//! the ID is preserved.
-//!
-//! What happens if two chunks for the same stream are requested simulatenously??
-#![feature(try_trait, result_flattening, hash_drain_filter)]
+#![doc(include = "../README.md")]
+#![feature(try_trait, result_flattening, hash_drain_filter, external_doc)]
 #![allow(unused_must_use, dead_code)]
 
 /// Contains all the error types for this crate.
@@ -58,10 +20,10 @@ use crate::session::Session;
 use std::time::Duration;
 use std::time::Instant;
 
+use async_trait::async_trait;
+use std::collections::HashMap;
 use xtra_proc::actor;
 use xtra_proc::handler;
-use std::collections::HashMap;
-use async_trait::async_trait;
 
 use slog::info;
 
@@ -94,7 +56,6 @@ pub struct StateManager {
     /// Logger
     pub logger: slog::Logger,
 }
-
 
 #[actor]
 impl StateManager {
@@ -131,7 +92,10 @@ impl StateManager {
 
     #[handler]
     async fn chunk_init_request(&mut self, id: String, chunk: u32) -> Result<String> {
-        let session = self.sessions.get_mut(&id).ok_or(NightfallError::SessionDoesntExist)?;
+        let session = self
+            .sessions
+            .get_mut(&id)
+            .ok_or(NightfallError::SessionDoesntExist)?;
 
         if !session.is_chunk_done(chunk) {
             if session.start_num() != chunk {
@@ -150,7 +114,7 @@ impl StateManager {
         if !session.has_started() {
             session.start();
         }
-        
+
         if session.is_chunk_done(chunk) {
             return Ok(session.init_seg());
         }
@@ -160,7 +124,10 @@ impl StateManager {
 
     #[handler]
     async fn chunk_request(&mut self, id: String, chunk: u32) -> Result<String> {
-        let session = self.sessions.get_mut(&id).ok_or(NightfallError::SessionDoesntExist)?;
+        let session = self
+            .sessions
+            .get_mut(&id)
+            .ok_or(NightfallError::SessionDoesntExist)?;
         let stats = self.stream_stats.entry(id).or_default();
 
         if !session.has_started() {
@@ -209,13 +176,19 @@ impl StateManager {
 
     #[handler]
     async fn chunk_eta(&mut self, id: String, chunk: u32) -> Result<u64> {
-        let session = self.sessions.get_mut(&id).ok_or(NightfallError::SessionDoesntExist)?;
+        let session = self
+            .sessions
+            .get_mut(&id)
+            .ok_or(NightfallError::SessionDoesntExist)?;
         Ok(session.eta_for(chunk).as_secs())
     }
 
     #[handler]
     async fn should_hard_seek(&mut self, id: String, chunk: u32) -> Result<bool> {
-        let session = self.sessions.get_mut(&id).ok_or(NightfallError::SessionDoesntExist)?;
+        let session = self
+            .sessions
+            .get_mut(&id)
+            .ok_or(NightfallError::SessionDoesntExist)?;
         let stats = self.stream_stats.entry(id).or_default();
 
         if !session.has_started() {
@@ -235,27 +208,33 @@ impl StateManager {
         // target is over 10 chunks into the future.
         if chunk > session.current_chunk() + 15
             && Instant::now() < stats.last_hard_seek + Duration::from_secs(15)
-            {
-                return Ok(true);
-            }
+        {
+            return Ok(true);
+        }
 
         Ok((session.eta_for(chunk).as_millis() as f64)
-           > (10_000.0 / session.raw_speed()).max(5_000.0))
+            > (10_000.0 / session.raw_speed()).max(5_000.0))
     }
 
     #[handler]
     async fn die(&mut self, id: String) -> Result<()> {
-        let session = self.sessions.get_mut(&id).ok_or(NightfallError::SessionDoesntExist)?;
+        let session = self
+            .sessions
+            .get_mut(&id)
+            .ok_or(NightfallError::SessionDoesntExist)?;
         info!(self.logger, "Killing session {}", id);
         session.join();
         session.set_timeout();
-        
+
         Ok(())
     }
 
     #[handler]
     async fn get_sub(&mut self, id: String, name: String) -> Result<String> {
-        let session = self.sessions.get_mut(&id).ok_or(NightfallError::SessionDoesntExist)?;
+        let session = self
+            .sessions
+            .get_mut(&id)
+            .ok_or(NightfallError::SessionDoesntExist)?;
 
         if !session.has_started() {
             session.start();
@@ -267,7 +246,10 @@ impl StateManager {
     #[handler]
     async fn get_stderr(&mut self, id: String) -> Result<String> {
         // TODO: Move this out of here, instead we should just return the log file.
-        let session = self.sessions.get_mut(&id).ok_or(NightfallError::SessionDoesntExist)?;
+        let session = self
+            .sessions
+            .get_mut(&id)
+            .ok_or(NightfallError::SessionDoesntExist)?;
         session.stderr().ok_or(NightfallError::Aborted)
     }
 
@@ -290,7 +272,8 @@ impl StateManager {
         }
 
         for (k, v) in to_reap.iter_mut() {
-            self.exit_statuses.insert(k.clone(), v.stderr().unwrap_or_default());
+            self.exit_statuses
+                .insert(k.clone(), v.stderr().unwrap_or_default());
             v.join();
             v.delete_tmp();
         }

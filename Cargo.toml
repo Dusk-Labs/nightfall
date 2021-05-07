@@ -4,8 +4,6 @@ version = "0.1.0"
 authors = ["Valerian G. <valerian.garleanu@pm.me>"]
 edition = "2018"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
 uuid = { version = "0.8.1", features = ["v4"] }
 lazy_static = "1.4.0"
@@ -17,7 +15,7 @@ err-derive = "0.3.0"
 xtra = "0.5.1"
 async-trait = "0.1.49"
 slog = "2.7.0"
-xtra_proc = { git = "https://github.com/vgarleanu/xtra_proc" }
+xtra_proc = "0.1.0"
 
 [target.'cfg(unix)'.dependencies]
 nix = "0.20.0"
