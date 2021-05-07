@@ -283,7 +283,7 @@ impl Profile for SubtitleProfile {
         let mut args = vec![];
 
         // we want to stream subtitles, thus we pipe its output to stdout and then we flush it to disk manually
-        args.append(&mut vec!["-f", "webvtt", "pipe:0"]);
+        args.append(&mut vec!["-f", "webvtt", "-"]);
 
         args.into_iter().map(ToString::to_string).collect()
     }

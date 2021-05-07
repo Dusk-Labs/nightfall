@@ -109,12 +109,14 @@ impl Session {
 
         self.child_pid = Some(process.id());
 
-        let stdout = process.stdout.take().unwrap();
-        let stdout_parser_thread = StdoutParser::new(self.id.clone(), stdout, process.id());
+        if !matches!(self.stream_type, StreamType::Subtitle { .. }) {
+            let stdout = process.stdout.take().unwrap();
+            let stdout_parser_thread = StdoutParser::new(self.id.clone(), stdout, process.id());
 
-        self.real_process = Some(process);
+            self.real_process = Some(process);
 
-        self.process = Some(thread::spawn(move || stdout_parser_thread.handle()));
+            self.process = Some(thread::spawn(move || stdout_parser_thread.handle()));
+        }
 
         Ok(())
     }
