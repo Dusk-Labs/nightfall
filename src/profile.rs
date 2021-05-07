@@ -57,6 +57,7 @@ pub enum VideoProfile {
 }
 
 impl VideoProfile {
+    #[allow(clippy::wrong_self_convention)]
     pub fn to_params(&self) -> (Vec<&str>, &str) {
         match self {
             Self::Direct => (vec!["-c:0", "copy"], "direct"),
@@ -194,6 +195,7 @@ pub enum AudioProfile {
 }
 
 impl AudioProfile {
+    #[allow(clippy::wrong_self_convention)]
     pub fn to_params(&self) -> (Vec<&str>, &str) {
         match self {
             Self::Low => (vec!["-c:0", "aac", "-ac", "2", "-ab", "128k"], "128kb"),

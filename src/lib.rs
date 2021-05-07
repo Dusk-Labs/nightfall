@@ -1,6 +1,5 @@
 #![doc(include = "../README.md")]
 #![feature(try_trait, result_flattening, hash_drain_filter, external_doc)]
-#![allow(unused_must_use, dead_code)]
 
 /// Contains all the error types for this crate.
 pub mod error;
@@ -78,7 +77,7 @@ impl StateManager {
             session_id.clone(),
             file,
             0,
-            format!("{}/{}", self.outdir.clone(), session_id.clone()),
+            format!("{}/{}", self.outdir.clone(), session_id),
             stream_type,
             self.ffmpeg.clone(),
         );
@@ -101,7 +100,7 @@ impl StateManager {
             if session.start_num() != chunk {
                 session.join();
                 session.reset_to(chunk);
-                session.start();
+                let _ = session.start();
 
                 let stat = self.stream_stats.entry(id).or_default();
                 stat.hard_seeked_at = chunk;
@@ -112,7 +111,7 @@ impl StateManager {
         }
 
         if !session.has_started() {
-            session.start();
+            let _ = session.start();
         }
 
         if session.is_chunk_done(chunk) {
@@ -131,7 +130,7 @@ impl StateManager {
         let stats = self.stream_stats.entry(id).or_default();
 
         if !session.has_started() {
-            session.start();
+            let _ = session.start();
         }
 
         if !session.is_chunk_done(chunk) {
@@ -154,7 +153,7 @@ impl StateManager {
             if should_hard_seek {
                 session.join();
                 session.reset_to(chunk);
-                session.start();
+                let _ = session.start();
 
                 stats.last_hard_seek = Instant::now();
                 stats.hard_seeked_at = chunk;
@@ -237,7 +236,7 @@ impl StateManager {
             .ok_or(NightfallError::SessionDoesntExist)?;
 
         if !session.has_started() {
-            session.start();
+            let _ = session.start();
         }
 
         session.subtitle(name).ok_or(NightfallError::ChunkNotDone)
@@ -255,6 +254,7 @@ impl StateManager {
 
     #[handler]
     async fn garbage_collect(&mut self) -> Result<()> {
+        #[allow(clippy::ptr_arg)]
         fn collect(_: &String, session: &mut Session) -> bool {
             if session.is_hard_timeout() {
                 return true;

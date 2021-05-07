@@ -5,11 +5,11 @@ cfg_if::cfg_if! {
         use nix::unistd::Pid;
 
         pub fn pause_proc(pid: i32) {
-            signal::kill(Pid::from_raw(pid), Signal::SIGSTOP);
+            let _ = signal::kill(Pid::from_raw(pid), Signal::SIGSTOP);
         }
 
         pub fn cont_proc(pid: i32) {
-            signal::kill(Pid::from_raw(pid), Signal::SIGCONT);
+            let _ = signal::kill(Pid::from_raw(pid), Signal::SIGCONT);
         }
 
         pub fn is_process_effectively_dead(pid: u32) -> bool {
@@ -17,11 +17,7 @@ cfg_if::cfg_if! {
             let process = psutil::process::Process::new(pid);
 
             if let Ok(process) = process {
-                // TODO: sometimes this unwrap will panic.
-                match process.status() {
-                    Ok(Zombie | Dead) =>  true,
-                    _ =>  false
-                }
+                matches!(process.status(), Ok(Zombie) | Ok(Dead))
             } else {
                 true
             }

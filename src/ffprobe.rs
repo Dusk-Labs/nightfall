@@ -1,5 +1,5 @@
 use serde_derive::{Deserialize, Serialize};
-use std::{path::PathBuf, process::Command, str};
+use std::{path::Path, process::Command, str};
 
 #[derive(Default, Debug, Clone, PartialEq)]
 pub struct FFPWrapper {
@@ -84,7 +84,7 @@ impl FFProbeCtx {
         }
     }
 
-    pub fn get_meta(&self, file: &PathBuf) -> Result<FFPWrapper, std::io::Error> {
+    pub fn get_meta(&self, file: &Path) -> Result<FFPWrapper, std::io::Error> {
         let probe = Command::new(self.ffprobe_bin.clone())
             .arg(file.to_str().unwrap())
             .arg("-v")
@@ -109,81 +109,5 @@ impl FFProbeCtx {
         );
 
         Ok(de)
-    }
-}
-
-impl FFPWrapper {
-    pub fn get_bitrate(&self) -> String {
-        if let Some(ctx) = self.ffpstream.clone() {
-            return ctx.format.bit_rate;
-        }
-        "0".into()
-    }
-
-    pub fn get_quality(&self) -> Option<String> {
-        if let Some(ctx) = self.ffpstream.clone() {
-            match ctx.streams[0].height {
-                Some(x) => Some(x.to_string()),
-                None => None,
-            }
-        } else {
-            None
-        }
-    }
-
-    pub fn get_codec(&self) -> Option<String> {
-        if let Some(ctx) = self.ffpstream.clone() {
-            Some(ctx.streams[0].codec_name.clone())
-        } else {
-            None
-        }
-    }
-
-    pub fn get_container(&self) -> Option<String> {
-        if let Some(ctx) = self.ffpstream.clone() {
-            Some(ctx.format.format_name)
-        } else {
-            None
-        }
-    }
-
-    pub fn get_audio_type(&self) -> Option<String> {
-        if let Some(ctx) = self.ffpstream.clone() {
-            Some(ctx.streams[1].codec_long_name.clone())
-        } else {
-            None
-        }
-    }
-
-    pub fn get_res(&self) -> Option<String> {
-        if let Some(ctx) = self.ffpstream.clone() {
-            Some(format!(
-                "{}x{}",
-                ctx.streams[0].width.unwrap_or(1920),
-                ctx.streams[0].height.unwrap_or(1080)
-            ))
-        } else {
-            None
-        }
-    }
-
-    pub fn get_duration(&self) -> Option<i32> {
-        if let Some(ctx) = self.ffpstream.clone() {
-            Some(ctx.format.duration.parse::<f64>().unwrap() as i32)
-        } else {
-            None
-        }
-    }
-
-    pub fn get_ms(&self) -> Option<u128> {
-        if let Some(ctx) = self.ffpstream.clone() {
-            Some((ctx.format.duration.parse::<f64>().unwrap().trunc() * 1_000_000.0) as u128)
-        } else {
-            None
-        }
-    }
-
-    pub fn is_corrupt(&self) -> Option<bool> {
-        Some(self.corrupt.unwrap_or(false))
     }
 }

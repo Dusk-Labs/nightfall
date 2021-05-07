@@ -43,7 +43,7 @@ pub struct Session {
     file: String,
     outdir: String,
     ffmpeg_bin: String,
-    process: Option<JoinHandle<()>>,
+    _process: Option<JoinHandle<()>>,
 
     has_started: bool,
     pub paused: bool,
@@ -74,7 +74,7 @@ impl Session {
             stream_type,
             start_number,
             last_chunk: 0,
-            process: None,
+            _process: None,
             paused: false,
             has_started: false,
             child_pid: None,
@@ -115,7 +115,7 @@ impl Session {
 
             self.real_process = Some(process);
 
-            self.process = Some(thread::spawn(move || stdout_parser_thread.handle()));
+            self._process = Some(thread::spawn(move || stdout_parser_thread.handle()));
         }
 
         Ok(())
@@ -145,7 +145,7 @@ impl Session {
                 args.append(&mut vec![
                     "-copyts".into(),
                     "-map".into(),
-                    format!("0:{}", map).into(),
+                    format!("0:{}", map),
                 ]);
                 args.append(&mut profile.to_args(self.start_num(), &self.outdir));
             }
@@ -169,8 +169,8 @@ impl Session {
 
     pub fn join(&mut self) {
         if let Some(ref mut x) = self.real_process {
-            x.kill();
-            x.wait();
+            let _ = x.kill();
+            let _ = x.wait();
         }
     }
 
@@ -178,24 +178,24 @@ impl Session {
         let file = format!("{}/ffmpeg.log", &self.outdir);
 
         let mut buf = String::new();
-        File::open(file).ok()?.read_to_string(&mut buf);
+        let _ = File::open(file).ok()?.read_to_string(&mut buf);
 
         if buf.len() <= 1000 {
             return Some(buf);
         }
 
-        return Some(buf.split_off(buf.len() - 1000));
+        Some(buf.split_off(buf.len() - 1000))
     }
 
     pub fn try_wait(&mut self) -> bool {
         if let Some(ref mut x) = self.real_process {
             if let Ok(Some(_)) = x.try_wait() {
-                x.wait();
+                let _ = x.wait();
                 return true;
             }
         }
 
-        return false;
+        false
     }
 
     pub fn is_hard_timeout(&mut self) -> bool {
@@ -207,7 +207,7 @@ impl Session {
     }
 
     pub fn delete_tmp(&self) {
-        fs::remove_dir_all(self.outdir.clone());
+        let _ = fs::remove_dir_all(self.outdir.clone());
     }
 
     pub fn is_dead(&self) -> bool {
@@ -215,7 +215,7 @@ impl Session {
             return crate::utils::is_process_effectively_dead(x);
         }
 
-        return true;
+        true
     }
 
     pub fn pause(&mut self) {
@@ -331,7 +331,7 @@ impl Session {
 
     pub fn reset_to(&mut self, chunk: u32) {
         self.start_number = chunk;
-        self.process = None;
+        self._process = None;
         self.last_chunk = chunk;
         self.has_started = false;
         self.paused = true;
