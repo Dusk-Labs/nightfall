@@ -18,6 +18,11 @@ pub enum StreamType {
         map: usize,
         profile: SubtitleProfile,
     },
+    RawVideo {
+        map: usize,
+        profile: RawVideoProfile,
+        tt: Option<usize>,
+    },
 }
 
 impl StreamType {
@@ -26,6 +31,7 @@ impl StreamType {
             Self::Video { map, .. } => *map,
             Self::Audio { map, .. } => *map,
             Self::Subtitle { map, .. } => *map,
+            Self::RawVideo { map, .. } => *map,
         }
     }
 }
@@ -40,6 +46,7 @@ impl fmt::Display for StreamType {
                 Self::Video { profile, .. } => profile.to_string(),
                 Self::Audio { profile, .. } => profile.to_string(),
                 Self::Subtitle { profile, .. } => profile.to_string(),
+                Self::RawVideo { profile, .. } => profile.to_string(),
             }
         )
     }
@@ -286,6 +293,31 @@ impl Profile for SubtitleProfile {
 
         // we want to stream subtitles, thus we pipe its output to stdout and then we flush it to disk manually
         args.append(&mut vec!["-f", "webvtt", "-"]);
+
+        args.into_iter().map(ToString::to_string).collect()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RawVideoProfile {
+    RawRgb,
+}
+
+impl fmt::Display for RawVideoProfile {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "RawRgb")
+    }
+}
+
+impl Profile for RawVideoProfile {
+    fn to_args(&self, _: u32, _: &str) -> Vec<String> {
+        let mut args = vec![];
+
+        // FIXME: stop hardcoding max extraction time
+        args.append(&mut vec!["-c:v", "rawvideo"]);
+        args.append(&mut vec!["-vf", "scale=8:8"]);
+        args.append(&mut vec!["-pix_fmt", "rgb24", "-preset", "ultrafast"]);
+        args.append(&mut vec!["-f", "data", "-"]); // pipe data back
 
         args.into_iter().map(ToString::to_string).collect()
     }

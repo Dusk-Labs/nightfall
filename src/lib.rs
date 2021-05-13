@@ -1,5 +1,11 @@
 #![doc(include = "../README.md")]
-#![feature(try_trait, result_flattening, hash_drain_filter, external_doc)]
+#![feature(
+    assert_matches,
+    try_trait,
+    result_flattening,
+    hash_drain_filter,
+    external_doc
+)]
 
 /// Contains all the error types for this crate.
 pub mod error;
@@ -16,6 +22,7 @@ use crate::error::*;
 use crate::profile::*;
 use crate::session::Session;
 
+use std::process::ChildStdout;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -291,5 +298,25 @@ impl StateManager {
         }
 
         Ok(())
+    }
+
+    #[handler]
+    async fn take_stdout(&mut self, id: String) -> Result<ChildStdout> {
+        let session = self
+            .sessions
+            .get_mut(&id)
+            .ok_or(NightfallError::SessionDoesntExist)?;
+
+        session.take_stdout().ok_or(NightfallError::Aborted)
+    }
+
+    #[handler]
+    async fn start(&mut self, id: String) -> Result<()> {
+        let session = self
+            .sessions
+            .get_mut(&id)
+            .ok_or(NightfallError::SessionDoesntExist)?;
+
+        session.start().map_err(|_| NightfallError::Aborted)
     }
 }

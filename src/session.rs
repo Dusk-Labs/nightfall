@@ -109,16 +109,26 @@ impl Session {
 
         self.child_pid = Some(process.id());
 
-        if !matches!(self.stream_type, StreamType::Subtitle { .. }) {
+        if !matches!(
+            self.stream_type,
+            StreamType::Subtitle { .. } | StreamType::RawVideo { .. }
+        ) {
             let stdout = process.stdout.take().unwrap();
             let stdout_parser_thread = StdoutParser::new(self.id.clone(), stdout, process.id());
 
             self.real_process = Some(process);
 
             self._process = Some(thread::spawn(move || stdout_parser_thread.handle()));
+        } else {
+            self.real_process = Some(process);
         }
 
         Ok(())
+    }
+
+    // NOTE: This will only work for RawVideo streams.
+    pub fn take_stdout(&mut self) -> Option<ChildStdout> {
+        self.real_process.as_mut().and_then(|x| x.stdout.take())
     }
 
     pub fn start_num(&self) -> u32 {
@@ -160,6 +170,13 @@ impl Session {
             StreamType::Subtitle { map, profile } => {
                 args.append(&mut vec!["-map".into(), format!("0:{}", map)]);
 
+                args.append(&mut profile.to_args(0, &self.outdir));
+            }
+            StreamType::RawVideo { map, profile, tt } => {
+                args.append(&mut vec!["-map".into(), format!("0:{}", map)]);
+                if let Some(tt) = tt {
+                    args.append(&mut vec!["-t".into(), tt.to_string()]);
+                }
                 args.append(&mut profile.to_args(0, &self.outdir));
             }
         }
