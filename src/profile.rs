@@ -315,6 +315,8 @@ impl Profile for RawVideoProfile {
 
         // FIXME: stop hardcoding max extraction time
         args.append(&mut vec!["-c:v", "rawvideo"]);
+        // might speed up decoding...
+        args.append(&mut vec!["-flags2", "fast"]);
         args.append(&mut vec!["-vf", "scale=18:16"]);
         args.append(&mut vec!["-pix_fmt", "rgb24", "-preset", "ultrafast"]);
         args.append(&mut vec!["-f", "data", "-"]); // pipe data back

@@ -8,14 +8,9 @@ use std::fs;
 use std::io;
 use std::io::Read;
 
-use std::io::BufRead;
-use std::io::BufReader;
 use std::path::Path;
-use std::process::Child;
-use std::process::Command;
 use std::process::Stdio;
-use std::thread;
-use std::thread::JoinHandle;
+
 use std::time::Duration;
 use std::time::Instant;
 
@@ -23,6 +18,18 @@ use std::fs::File;
 
 use std::sync::Arc;
 use std::sync::RwLock;
+
+use tokio::io::AsyncBufReadExt;
+use tokio::io::BufReader;
+
+use tokio::process::Child;
+use tokio::process::ChildStdout;
+use tokio::process::Command;
+
+use tokio::task::JoinHandle;
+
+use tokio_stream::wrappers::LinesStream;
+use tokio_stream::StreamExt;
 
 /// Length of a chunk in seconds.
 const CHUNK_SIZE: u32 = 5;
@@ -84,7 +91,7 @@ impl Session {
         }
     }
 
-    pub fn start(&mut self) -> Result<(), io::Error> {
+    pub async fn start(&mut self) -> Result<(), io::Error> {
         // make sure we actually have a path to write files to.
         self.has_started = true;
         self.paused = false;
@@ -107,18 +114,19 @@ impl Session {
             .args(args.as_slice())
             .spawn()?;
 
-        self.child_pid = Some(process.id());
+        self.child_pid = process.id();
 
         if !matches!(
             self.stream_type,
             StreamType::Subtitle { .. } | StreamType::RawVideo { .. }
         ) {
             let stdout = process.stdout.take().unwrap();
-            let stdout_parser_thread = StdoutParser::new(self.id.clone(), stdout, process.id());
+            let stdout_parser_thread =
+                StdoutParser::new(self.id.clone(), stdout, self.child_pid.clone().unwrap());
 
             self.real_process = Some(process);
 
-            self._process = Some(thread::spawn(move || stdout_parser_thread.handle()));
+            self._process = Some(tokio::spawn(stdout_parser_thread.handle()));
         } else {
             self.real_process = Some(process);
         }
@@ -144,8 +152,6 @@ impl Session {
             (self.start_num() * CHUNK_SIZE).to_string().as_ref(),
             "-i",
             self.file.as_str(),
-            "-threads",
-            "0",
         ])
         .map(ToString::to_string)
         .collect::<Vec<_>>();
@@ -366,8 +372,6 @@ impl fmt::Debug for Session {
     }
 }
 
-use std::process::ChildStdout;
-
 struct StdoutParser {
     id: String,
     process_stdout: ChildStdout,
@@ -383,31 +387,35 @@ impl StdoutParser {
         }
     }
 
-    fn handle(self) {
-        let stdio = BufReader::new(self.process_stdout);
+    async fn handle(self) {
+        let mut stdio = LinesStream::new(BufReader::new(self.process_stdout).lines());
         let mut map: HashMap<String, String> = HashMap::new();
 
-        let mut stdio_b = stdio.lines().peekable();
+        let interval = tokio::time::interval(Duration::from_millis(100));
+        tokio::pin!(interval);
 
         loop {
-            while stdio_b.peek().is_some() {
-                let output = stdio_b.next().unwrap().unwrap();
-                let output: Vec<&str> = output.split('=').collect();
+            tokio::select! {
+                _ = interval.tick() => {
+                    if crate::utils::is_process_effectively_dead(self.pid) {
+                        break;
+                    }
+                },
 
-                // remove whitespace on both ends
-                map.insert(output[0].into(), output[1].trim_start().trim_end().into());
+                Some(Ok(v)) = stdio.next() => {
+                    let output: Vec<&str> = v.split('=').collect();
 
-                {
-                    let mut lock = STREAMING_SESSION.write().unwrap();
-                    let _ = lock.insert(self.id.clone(), map.clone());
+                    // remove whitespace on both ends
+                    map.insert(output[0].into(), output[1].trim_start().trim_end().into());
+
+                    {
+                        let mut lock = STREAMING_SESSION.write().unwrap();
+                        let _ = lock.insert(self.id.clone(), map.clone());
+                    }
+
+                    continue;
                 }
             }
-
-            if crate::utils::is_process_effectively_dead(self.pid) {
-                break;
-            }
-
-            std::thread::sleep(Duration::from_millis(100));
         }
 
         let mut lock = STREAMING_SESSION.write().unwrap();

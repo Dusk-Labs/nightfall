@@ -22,7 +22,6 @@ use crate::error::*;
 use crate::profile::*;
 use crate::session::Session;
 
-use std::process::ChildStdout;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -32,6 +31,8 @@ use xtra_proc::actor;
 use xtra_proc::handler;
 
 use slog::info;
+
+pub use tokio::process::ChildStdout;
 
 pub struct StreamStat {
     hard_seeked_at: u32,
@@ -107,7 +108,7 @@ impl StateManager {
             if session.start_num() != chunk {
                 session.join();
                 session.reset_to(chunk);
-                let _ = session.start();
+                let _ = session.start().await;
 
                 let stat = self.stream_stats.entry(id).or_default();
                 stat.hard_seeked_at = chunk;
@@ -118,7 +119,7 @@ impl StateManager {
         }
 
         if !session.has_started() {
-            let _ = session.start();
+            let _ = session.start().await;
         }
 
         if session.is_chunk_done(chunk) {
@@ -137,7 +138,7 @@ impl StateManager {
         let stats = self.stream_stats.entry(id).or_default();
 
         if !session.has_started() {
-            let _ = session.start();
+            let _ = session.start().await;
         }
 
         if !session.is_chunk_done(chunk) {
@@ -160,7 +161,7 @@ impl StateManager {
             if should_hard_seek {
                 session.join();
                 session.reset_to(chunk);
-                let _ = session.start();
+                let _ = session.start().await;
 
                 stats.last_hard_seek = Instant::now();
                 stats.hard_seeked_at = chunk;
@@ -243,7 +244,7 @@ impl StateManager {
             .ok_or(NightfallError::SessionDoesntExist)?;
 
         if !session.has_started() {
-            let _ = session.start();
+            let _ = session.start().await;
         }
 
         session.subtitle(name).ok_or(NightfallError::ChunkNotDone)
@@ -317,6 +318,6 @@ impl StateManager {
             .get_mut(&id)
             .ok_or(NightfallError::SessionDoesntExist)?;
 
-        session.start().map_err(|_| NightfallError::Aborted)
+        session.start().await.map_err(|_| NightfallError::Aborted)
     }
 }
