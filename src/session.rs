@@ -144,17 +144,21 @@ impl Session {
     }
 
     fn build_args(&self) -> Vec<String> {
-        let mut args = IntoIter::new([
-            "-fflags",
-            "+genpts",
-            "-y",
-            "-ss",
-            (self.start_num() * CHUNK_SIZE).to_string().as_ref(),
-            "-i",
-            self.file.as_str(),
-        ])
-        .map(ToString::to_string)
-        .collect::<Vec<_>>();
+        let mut args = IntoIter::new(["-fflags", "+genpts", "-y"])
+            .map(ToString::to_string)
+            .collect::<Vec<_>>();
+
+        if let StreamType::RawVideo { sseof, .. } = self.stream_type {
+            if let Some(sseof) = sseof {
+                args.append(&mut vec!["-sseof".into(), (-sseof).to_string()]);
+            }
+        } else {
+            args.append(&mut vec![
+                "-ss".into(),
+                (self.start_num() * CHUNK_SIZE).to_string(),
+            ])
+        }
+        args.append(&mut vec!["-i".into(), self.file.clone()]);
 
         match self.stream_type {
             StreamType::Audio { map, profile } => {
@@ -178,10 +182,17 @@ impl Session {
 
                 args.append(&mut profile.to_args(0, &self.outdir));
             }
-            StreamType::RawVideo { map, profile, tt } => {
+            StreamType::RawVideo {
+                map,
+                profile,
+                tt,
+                sseof,
+            } => {
                 args.append(&mut vec!["-map".into(), format!("0:{}", map)]);
-                if let Some(tt) = tt {
-                    args.append(&mut vec!["-t".into(), tt.to_string()]);
+                if sseof.is_none() {
+                    if let Some(tt) = tt {
+                        args.append(&mut vec!["-t".into(), tt.to_string()]);
+                    }
                 }
                 args.append(&mut profile.to_args(0, &self.outdir));
             }

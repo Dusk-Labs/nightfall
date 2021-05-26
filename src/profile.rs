@@ -22,6 +22,7 @@ pub enum StreamType {
         map: usize,
         profile: RawVideoProfile,
         tt: Option<usize>,
+        sseof: Option<i64>,
     },
 }
 
