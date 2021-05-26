@@ -237,6 +237,18 @@ impl StateManager {
     }
 
     #[handler]
+    async fn die_ignore_gc(&mut self, id: String) -> Result<()> {
+        let session = self
+            .sessions
+            .get_mut(&id)
+            .ok_or(NightfallError::SessionDoesntExist)?;
+        info!(self.logger, "Killing session {}", id);
+        session.join();
+
+        Ok(())
+    }
+
+    #[handler]
     async fn get_sub(&mut self, id: String, name: String) -> Result<String> {
         let session = self
             .sessions
