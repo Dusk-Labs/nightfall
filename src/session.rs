@@ -270,9 +270,9 @@ impl Session {
         }
     }
 
-    pub fn get_key(&self, k: &str) -> Result<String, std::option::NoneError> {
+    pub fn get_key(&self, k: &str) -> Option<String> {
         let session = STREAMING_SESSION.read().unwrap();
-        Ok(session.get(&self.id)?.get(k)?.clone())
+        session.get(&self.id)?.get(k).cloned()
     }
 
     pub fn current_chunk(&self) -> u32 {
@@ -302,7 +302,7 @@ impl Session {
     pub fn raw_speed(&self) -> f64 {
         self.get_key("speed")
             .map(|x| x.trim_end_matches('x').to_string())
-            .and_then(|x| x.parse::<f64>().map_err(|_| std::option::NoneError))
+            .and_then(|x| x.parse::<f64>().ok())
             .unwrap_or(1.0) // assume if key is missing that our speed is 2.0
     }
 

@@ -1,11 +1,5 @@
 #![doc(include = "../README.md")]
-#![feature(
-    assert_matches,
-    try_trait,
-    result_flattening,
-    hash_drain_filter,
-    external_doc
-)]
+#![feature(assert_matches, result_flattening, hash_drain_filter, external_doc)]
 
 /// Contains all the error types for this crate.
 pub mod error;
