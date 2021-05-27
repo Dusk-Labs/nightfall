@@ -201,10 +201,10 @@ impl Session {
         args
     }
 
-    pub fn join(&mut self) {
+    pub async fn join(&mut self) {
         if let Some(ref mut x) = self.real_process {
-            let _ = x.kill();
-            let _ = x.wait();
+            let _ = x.kill().await;
+            let _ = x.wait().await;
         }
     }
 
@@ -224,7 +224,6 @@ impl Session {
     pub fn try_wait(&mut self) -> bool {
         if let Some(ref mut x) = self.real_process {
             if let Ok(Some(_)) = x.try_wait() {
-                let _ = x.wait();
                 return true;
             }
         }

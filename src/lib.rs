@@ -100,7 +100,7 @@ impl StateManager {
 
         if !session.is_chunk_done(chunk) {
             if session.start_num() != chunk {
-                session.join();
+                session.join().await;
                 session.reset_to(chunk);
                 let _ = session.start().await;
 
@@ -153,7 +153,7 @@ impl StateManager {
             session.cont();
 
             if should_hard_seek {
-                session.join();
+                session.join().await;
                 session.reset_to(chunk);
                 let _ = session.start().await;
 
@@ -224,7 +224,7 @@ impl StateManager {
             .get_mut(&id)
             .ok_or(NightfallError::SessionDoesntExist)?;
         info!(self.logger, "Killing session {}", id);
-        session.join();
+        session.join().await;
         session.set_timeout();
 
         Ok(())
@@ -237,7 +237,7 @@ impl StateManager {
             .get_mut(&id)
             .ok_or(NightfallError::SessionDoesntExist)?;
         info!(self.logger, "Killing session {}", id);
-        session.join();
+        session.join().await;
 
         Ok(())
     }
@@ -288,7 +288,7 @@ impl StateManager {
         for (k, v) in to_reap.iter_mut() {
             self.exit_statuses
                 .insert(k.clone(), v.stderr().unwrap_or_default());
-            v.join();
+            v.join().await;
             v.delete_tmp();
         }
 
