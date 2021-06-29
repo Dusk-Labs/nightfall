@@ -18,13 +18,21 @@ use crate::session::Session;
 
 use std::time::Duration;
 use std::time::Instant;
+use std::io::prelude::*;
+use std::io::BufReader;
+use std::fs::File;
+use std::io::SeekFrom;
+use std::path::Path;
+use std::collections::HashMap;
 
 use async_trait::async_trait;
-use std::collections::HashMap;
 use xtra_proc::actor;
 use xtra_proc::handler;
 
 use slog::info;
+use slog::warn;
+
+use mp4::mp4box::*;
 
 pub use tokio::process::ChildStdout;
 
@@ -171,6 +179,13 @@ impl StateManager {
             }
 
             session.reset_timeout(chunk);
+
+            let log = self.logger.clone();
+            let path = chunk_path.clone();
+            if let Err(e) = tokio::task::spawn_blocking(move || patch_segment(log, path, chunk)).await.unwrap() {
+                warn!(self.logger, "Failed to patch segment."; "error" => e.to_string());
+            }
+
             Ok(chunk_path)
         }
     }
@@ -326,4 +341,72 @@ impl StateManager {
 
         session.start().await.map_err(|_| NightfallError::Aborted)
     }
+}
+
+/// Function will patch a segment to appear as if it belongs to the current stream and is
+/// sequential.
+fn patch_segment<T: AsRef<Path>>(log: slog::Logger, file: T, seq: u32) -> Result<()> {
+    let f = File::open(&file)?;
+    let size = f.metadata()?.len();
+    let mut reader = BufReader::new(f);
+
+    let start = reader.seek(SeekFrom::Current(0))?;
+
+    let mut styp = None;
+    let mut sidx = None;
+    let mut moof = None;
+    let mut mdat = None;
+
+    let mut current = start;
+    while current < size {
+        let header = BoxHeader::read(&mut reader)?;
+        let BoxHeader { name, size: s } = header;
+
+        match name {
+            BoxType::SidxBox => {
+                sidx = Some(SidxBox::read_box(&mut reader, s)?);
+            }
+            BoxType::MoofBox => {
+                moof = Some(MoofBox::read_box(&mut reader, s)?);
+            }
+            BoxType::MdatBox => {
+                let mut vec_mdat = vec![0; (s - 8) as usize];
+                reader.read_exact(&mut vec_mdat)?;
+                mdat = Some(vec_mdat);
+            }
+            BoxType::StypBox => {
+                let mut styp_box = FtypBox::read_box(&mut reader, s)?;
+                // ftyp and styp boxes are interchangeable.
+                styp_box.box_type = BoxType::StypBox;
+                styp = Some(styp_box);
+            }
+            b => {
+                warn!(log, "Got a weird box type."; "box_type" => b.to_string());
+                skip_box(&mut reader, s)?;
+            }
+        }
+
+        current = reader.seek(SeekFrom::Current(0))?;
+    }
+
+    let styp = styp.ok_or(NightfallError::MissingSegmentBox)?;
+    let sidx = sidx.ok_or(NightfallError::MissingSegmentBox)?;
+    let mut moof = moof.ok_or(NightfallError::MissingSegmentBox)?;
+    let tfdt = moof.trafs[0].tfdt.as_mut().ok_or(NightfallError::MissingSegmentBox)?;
+    let mdat = mdat.ok_or(NightfallError::MissingSegmentBox)?;
+
+    moof.mfhd.sequence_number = seq;
+    tfdt.base_media_decode_time = sidx.earliest_presentation_time + 5;
+
+
+    let mut out = File::create(&file)?;
+    styp.write_box(&mut out)?;
+    sidx.write_box(&mut out)?;
+    moof.write_box(&mut out)?;
+
+    let mdat_hdr = BoxHeader::new(BoxType::MdatBox, mdat.len() as u64 + 8);
+    mdat_hdr.write(&mut out)?;
+    out.write(&mdat)?;
+
+    Ok(())
 }
