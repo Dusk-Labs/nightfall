@@ -102,7 +102,7 @@ impl Session {
 
         self.child_pid = process.id();
 
-        if !self.profile_ctx.is_stdio_stream() {
+        if !self.profile.is_stdio_stream() {
             let stdout = process.stdout.take().unwrap();
             let stdout_parser_thread =
                 StdoutParser::new(self.id.clone(), stdout, self.child_pid.clone().unwrap());

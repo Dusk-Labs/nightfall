@@ -108,6 +108,7 @@ impl StateManager {
             self.logger,
             "New session {} map {} -> {}", &session_id, profile_args.stream, tag
         );
+
         profile_args.outdir = format!("{}/{}", &self.outdir, session_id);
         profile_args.ffmpeg_bin = self.ffmpeg.clone();
 

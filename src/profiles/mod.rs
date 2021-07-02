@@ -68,6 +68,10 @@ pub trait TranscodingProfile: Send + Sync + 'static {
     fn supports(&self, _codec_in: &str, codec_out: &str) -> bool;
 
     fn tag(&self) -> &str;
+
+    fn is_stdio_stream(&self) -> bool {
+        false
+    }
 }
 
 /// A context which contains information we may need when building the ffmpeg arguments.
@@ -77,7 +81,7 @@ pub struct ProfileContext {
     pub pre_args: Vec<String>,
     pub start_num: u32,
     pub file: String,
-    pub(crate) outdir: String,
+    pub outdir: String,
     pub seek: Option<i64>,
     pub max_to_transcode: Option<u64>,
 
@@ -85,13 +89,7 @@ pub struct ProfileContext {
     pub height: Option<i64>,
     pub width: Option<i64>,
     pub audio_channels: u64,
-    pub(crate) ffmpeg_bin: String,
-}
-
-impl ProfileContext {
-    pub fn is_stdio_stream(&self) -> bool {
-        self.outdir == "-"
-    }
+    pub ffmpeg_bin: String,
 }
 
 impl Default for ProfileContext {
