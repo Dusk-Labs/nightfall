@@ -252,7 +252,7 @@ impl TranscodingProfile for RawVideoTranscodeProfile {
             ]);
         }
 
-        args.append(&mut vec!["-f".into(), "data".into(), "-".into()]);
+        args.append(&mut vec!["-f".into(), "data".into(), ctx.outdir]);
 
         Some(args)
     }

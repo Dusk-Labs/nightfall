@@ -85,13 +85,12 @@ pub struct ProfileContext {
     pub height: Option<i64>,
     pub width: Option<i64>,
     pub audio_channels: u64,
-    pub audio_bitrate: u64,
     pub(crate) ffmpeg_bin: String,
 }
 
 impl ProfileContext {
     pub fn is_stdio_stream(&self) -> bool {
-        self.file == "-"
+        self.outdir == "-"
     }
 }
 
@@ -109,7 +108,6 @@ impl Default for ProfileContext {
             height: None,
             width: None,
             audio_channels: 2,
-            audio_bitrate: 120_000,
             ffmpeg_bin: "ffmpeg".into(),
         }
     }

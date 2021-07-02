@@ -40,7 +40,7 @@ impl TranscodingProfile for AacTranscodeProfile {
 
         let ac = ctx.audio_channels.to_string();
         args.push(ac);
-        let ab = ctx.audio_bitrate.to_string();
+        let ab = ctx.bitrate.unwrap_or(120_000).to_string();
         args.push("-ab".into());
         args.push(ab);
 
