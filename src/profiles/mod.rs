@@ -7,6 +7,7 @@ pub use subtitle::WebvttTranscodeProfile;
 pub use video::H264TranscodeProfile;
 pub use video::H264TransmuxProfile;
 pub use video::RawVideoTranscodeProfile;
+pub use video::VaapiTranscodeProfile;
 
 use std::lazy::SyncOnceCell;
 
@@ -14,11 +15,12 @@ static PROFILES: SyncOnceCell<Vec<Box<dyn TranscodingProfile>>> = SyncOnceCell::
 
 pub fn profiles_init(_ffmpeg_bin: String) {
     let profiles: Vec<Box<dyn TranscodingProfile>> = vec![
-            box AacTranscodeProfile,
-            box H264TranscodeProfile,
-            box H264TransmuxProfile,
-            box RawVideoTranscodeProfile,
-            box WebvttTranscodeProfile
+        box AacTranscodeProfile,
+        box H264TranscodeProfile,
+        box H264TransmuxProfile,
+        box RawVideoTranscodeProfile,
+        box WebvttTranscodeProfile,
+        box VaapiTranscodeProfile,
     ];
 
     let _ = PROFILES.set(profiles.into_iter().filter(|x| x.is_enabled()).collect());
@@ -36,7 +38,7 @@ pub fn get_profile_for(
         .filter(|x| x.stream_type() == stream_type && x.supports(codec_in, codec_out))
         .map(AsRef::as_ref)
         .collect();
-    
+
     profiles.sort_by_key(|x| x.profile_type());
 
     profiles

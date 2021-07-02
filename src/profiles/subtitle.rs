@@ -23,7 +23,7 @@ impl TranscodingProfile for WebvttTranscodeProfile {
             format!("0:{}", ctx.stream),
             "-f".into(),
             "webvtt".into(),
-            "-".into()
+            "-".into(),
         ];
 
         Some(args)

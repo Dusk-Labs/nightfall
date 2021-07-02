@@ -1,5 +1,11 @@
 #![doc = include_str!("../README.md")]
-#![feature(assert_matches, result_flattening, hash_drain_filter, box_syntax, once_cell)]
+#![feature(
+    assert_matches,
+    result_flattening,
+    hash_drain_filter,
+    box_syntax,
+    once_cell
+)]
 
 /// Contains all the error types for this crate.
 pub mod error;
@@ -17,6 +23,7 @@ use crate::profiles::*;
 use crate::session::Session;
 
 use std::collections::HashMap;
+use std::collections::VecDeque;
 use std::fs::File;
 use std::io::prelude::*;
 use std::io::BufReader;
@@ -202,11 +209,14 @@ impl StateManager {
 
             let log = self.logger.clone();
             let path = chunk_path.clone();
-            if let Err(e) = tokio::task::spawn_blocking(move || patch_segment(log, path, chunk))
+
+            let real_segment = session.real_segment;
+            match tokio::task::spawn_blocking(move || patch_segment(log, path, real_segment))
                 .await
                 .unwrap()
             {
-                warn!(self.logger, "Failed to patch segment."; "error" => e.to_string());
+                Ok(seq) => session.real_segment = seq,
+                Err(e) => warn!(self.logger, "Failed to patch segment."; "error" => e.to_string()),
             }
 
             Ok(chunk_path)
@@ -366,42 +376,82 @@ impl StateManager {
     }
 }
 
+#[derive(Default)]
+pub struct Segment {
+    pub styp: Option<FtypBox>,
+    pub sidx: Option<SidxBox>,
+    pub moof: Option<MoofBox>,
+    pub mdat: Option<MdatBox>,
+}
+
+impl Segment {
+    pub fn normalize_and_dump(mut self, seq: u32, file: &mut File) -> Result<()> {
+        if let Some(tfdt) = self
+            .moof
+            .as_mut()
+            .map(|x| x.trafs[0].tfdt.as_mut())
+            .ok_or(NightfallError::MissingSegmentBox)?
+        {
+            if let Some(sidx) = self.sidx.as_ref() {
+                tfdt.base_media_decode_time = sidx.earliest_presentation_time;
+            }
+        }
+
+        if let Some(moof) = self.moof.as_mut() {
+            moof.mfhd.sequence_number = seq;
+        }
+
+        if let Some(mut styp) = self.styp {
+            styp.box_type = BoxType::StypBox;
+            styp.write_box(file)?;
+        }
+        if let Some(sidx) = self.sidx {
+            sidx.write_box(file)?;
+        }
+        if let Some(moof) = self.moof {
+            moof.write_box(file)?;
+        }
+        if let Some(mdat) = self.mdat {
+            mdat.write_box(file)?;
+        }
+
+        Ok(())
+    }
+}
+
 /// Function will patch a segment to appear as if it belongs to the current stream and is
 /// sequential.
-fn patch_segment<T: AsRef<Path>>(log: slog::Logger, file: T, seq: u32) -> Result<()> {
+fn patch_segment<T: AsRef<Path>>(log: slog::Logger, file: T, mut seq: u32) -> Result<u32> {
     let f = File::open(&file)?;
     let size = f.metadata()?.len();
     let mut reader = BufReader::new(f);
 
     let start = reader.seek(SeekFrom::Current(0))?;
 
-    let mut styp = None;
-    let mut sidx = None;
-    let mut moof = None;
-    let mut mdat = None;
-
+    let mut segments = VecDeque::new();
     let mut current = start;
+    let mut current_segment = Segment::default();
+
     while current < size {
         let header = BoxHeader::read(&mut reader)?;
         let BoxHeader { name, size: s } = header;
 
         match name {
             BoxType::SidxBox => {
-                sidx = Some(SidxBox::read_box(&mut reader, s)?);
+                current_segment.sidx = Some(SidxBox::read_box(&mut reader, s)?);
             }
             BoxType::MoofBox => {
-                moof = Some(MoofBox::read_box(&mut reader, s)?);
+                current_segment.moof = Some(MoofBox::read_box(&mut reader, s)?);
             }
             BoxType::MdatBox => {
-                let mut vec_mdat = vec![0; (s - 8) as usize];
-                reader.read_exact(&mut vec_mdat)?;
-                mdat = Some(vec_mdat);
+                current_segment.mdat = Some(MdatBox::read_box(&mut reader, s)?);
+                // mdat is the last atom in a segment so we break the segment here and append it to
+                // our list.
+                segments.push_back(current_segment);
+                current_segment = Segment::default();
             }
-            BoxType::StypBox => {
-                let mut styp_box = FtypBox::read_box(&mut reader, s)?;
-                // ftyp and styp boxes are interchangeable.
-                styp_box.box_type = BoxType::StypBox;
-                styp = Some(styp_box);
+            BoxType::StypBox | BoxType::FtypBox => {
+                current_segment.styp = Some(FtypBox::read_box(&mut reader, s)?);
             }
             b => {
                 warn!(log, "Got a weird box type."; "box_type" => b.to_string());
@@ -412,26 +462,25 @@ fn patch_segment<T: AsRef<Path>>(log: slog::Logger, file: T, seq: u32) -> Result
         current = reader.seek(SeekFrom::Current(0))?;
     }
 
-    let styp = styp.ok_or(NightfallError::MissingSegmentBox)?;
-    let sidx = sidx.ok_or(NightfallError::MissingSegmentBox)?;
-    let mut moof = moof.ok_or(NightfallError::MissingSegmentBox)?;
-    let tfdt = moof.trafs[0]
-        .tfdt
-        .as_mut()
-        .ok_or(NightfallError::MissingSegmentBox)?;
-    let mdat = mdat.ok_or(NightfallError::MissingSegmentBox)?;
-
-    moof.mfhd.sequence_number = seq;
-    tfdt.base_media_decode_time = sidx.earliest_presentation_time + 5;
-
     let mut out = File::create(&file)?;
-    styp.write_box(&mut out)?;
-    sidx.write_box(&mut out)?;
-    moof.write_box(&mut out)?;
 
-    let mdat_hdr = BoxHeader::new(BoxType::MdatBox, mdat.len() as u64 + 8);
-    mdat_hdr.write(&mut out)?;
-    out.write(&mdat)?;
+    while let Some(segment) = segments.pop_front() {
+        segment.normalize_and_dump(seq, &mut out)?;
+        seq += 1;
+    }
 
-    Ok(())
+    Ok(seq)
+}
+
+trait WriteBoxToFile {
+    fn write_box(&self, writer: File) -> Result<u64>;
+}
+
+impl<T> WriteBoxToFile for T
+where
+    T: WriteBox<File>,
+{
+    fn write_box<'a>(&self, writer: File) -> Result<u64> {
+        Ok(<T as WriteBox<File>>::write_box(&self, writer)?)
+    }
 }

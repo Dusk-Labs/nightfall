@@ -43,7 +43,7 @@ pub struct Session {
     pub id: String,
     pub paused: bool,
 
-    profile: &'static dyn TranscodingProfile,
+    pub profile: &'static dyn TranscodingProfile,
     profile_ctx: ProfileContext,
     _process: Option<JoinHandle<()>>,
     has_started: bool,
@@ -51,6 +51,7 @@ pub struct Session {
     hard_timeout: Instant,
     child_pid: Option<u32>,
     real_process: Option<Child>,
+    pub real_segment: u32,
 }
 
 impl Session {
@@ -64,6 +65,7 @@ impl Session {
         Self {
             id,
             profile,
+            real_segment: profile_ctx.start_num,
             profile_ctx,
             last_chunk: 0,
             _process: None,
