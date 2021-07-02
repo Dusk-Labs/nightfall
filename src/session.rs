@@ -103,16 +103,14 @@ impl Session {
         self.child_pid = process.id();
 
         if !self.profile.is_stdio_stream() {
-            let stdout = process.stdout.take().unwrap();
-            let stdout_parser_thread =
-                StdoutParser::new(self.id.clone(), stdout, self.child_pid.clone().unwrap());
+            if let Some(stdout) = process.stdout.take() {
+                let stdout_parser_thread =
+                    StdoutParser::new(self.id.clone(), stdout, self.child_pid.clone().unwrap());
 
-            self.real_process = Some(process);
-
-            self._process = Some(tokio::spawn(stdout_parser_thread.handle()));
-        } else {
-            self.real_process = Some(process);
+                self._process = Some(tokio::spawn(stdout_parser_thread.handle()));
+            }
         }
+        self.real_process = Some(process);
 
         Ok(())
     }

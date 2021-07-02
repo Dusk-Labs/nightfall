@@ -252,7 +252,7 @@ impl TranscodingProfile for RawVideoTranscodeProfile {
             ]);
         }
 
-        args.append(&mut vec!["-f".into(), "data".into(), ctx.outdir]);
+        args.append(&mut vec!["-f".into(), "data".into(), "-".into()]);
 
         Some(args)
     }
@@ -263,5 +263,9 @@ impl TranscodingProfile for RawVideoTranscodeProfile {
 
     fn tag(&self) -> &str {
         "rawvideo"
+    }
+
+    fn is_stdio_stream(&self) -> bool {
+        true
     }
 }

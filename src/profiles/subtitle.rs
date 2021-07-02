@@ -23,7 +23,7 @@ impl TranscodingProfile for WebvttTranscodeProfile {
             format!("0:{}", ctx.stream),
             "-f".into(),
             "webvtt".into(),
-            ctx.outdir
+            "-".into()
         ];
 
         Some(args)
@@ -35,5 +35,9 @@ impl TranscodingProfile for WebvttTranscodeProfile {
 
     fn tag(&self) -> &str {
         "webvtt"
+    }
+
+    fn is_stdio_stream(&self) -> bool {
+        true
     }
 }
