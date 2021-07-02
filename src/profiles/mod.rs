@@ -114,9 +114,9 @@ impl Default for ProfileContext {
 #[repr(u32)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Ord, PartialOrd)]
 pub enum ProfileType {
-    HardwareTranscode,
-    Transmux,
     Transcode,
+    Transmux,
+    HardwareTranscode,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
