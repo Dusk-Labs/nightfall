@@ -8,16 +8,20 @@ pub use video::H264TranscodeProfile;
 pub use video::H264TransmuxProfile;
 pub use video::RawVideoTranscodeProfile;
 
-use std::sync::Arc;
+use std::lazy::SyncOnceCell;
 
-lazy_static::lazy_static! {
-    static ref PROFILES: Arc<Vec<Box<dyn TranscodingProfile>>> = Arc::new(vec![
+static PROFILES: SyncOnceCell<Vec<Box<dyn TranscodingProfile>>> = SyncOnceCell::new();
+
+pub fn profiles_init(_ffmpeg_bin: String) {
+    let profiles: Vec<Box<dyn TranscodingProfile>> = vec![
             box AacTranscodeProfile,
             box H264TranscodeProfile,
             box H264TransmuxProfile,
             box RawVideoTranscodeProfile,
             box WebvttTranscodeProfile
-    ]);
+    ];
+
+    let _ = PROFILES.set(profiles.into_iter().filter(|x| x.is_enabled()).collect());
 }
 
 pub fn get_profile_for(
@@ -25,11 +29,17 @@ pub fn get_profile_for(
     codec_in: &str,
     codec_out: &str,
 ) -> Vec<&'static dyn TranscodingProfile> {
-    PROFILES
+    let mut profiles: Vec<_> = PROFILES
+        .get()
+        .expect("nightfall::PROFILES not initialized.")
         .iter()
-        .filter(|x| x.stream_type() != stream_type && !x.supports(codec_in, codec_out))
+        .filter(|x| x.stream_type() == stream_type && x.supports(codec_in, codec_out))
         .map(AsRef::as_ref)
-        .collect()
+        .collect();
+    
+    profiles.sort_by_key(|x| x.profile_type());
+
+    profiles
 }
 
 pub trait TranscodingProfile: Send + Sync + 'static {
@@ -105,7 +115,8 @@ impl Default for ProfileContext {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u32)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Ord, PartialOrd)]
 pub enum ProfileType {
     HardwareTranscode,
     Transmux,
