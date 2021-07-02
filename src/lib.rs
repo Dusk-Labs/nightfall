@@ -1,29 +1,29 @@
 #![doc = include_str!("../README.md")]
-#![feature(assert_matches, result_flattening, hash_drain_filter)]
+#![feature(assert_matches, result_flattening, hash_drain_filter, box_syntax)]
 
 /// Contains all the error types for this crate.
 pub mod error;
 /// Helper methods to probe a mediafile for metadata.
 pub mod ffprobe;
-/// Contains our profiles as well as their respective args.
-pub mod profile;
+/// Contains all profiles currently implemented.
+pub mod profiles;
 /// Contains the struct representing a streaming session.
 mod session;
 /// Contains utils that make my life easier.
 pub mod utils;
 
 use crate::error::*;
-use crate::profile::*;
+use crate::profiles::*;
 use crate::session::Session;
 
-use std::time::Duration;
-use std::time::Instant;
+use std::collections::HashMap;
+use std::fs::File;
 use std::io::prelude::*;
 use std::io::BufReader;
-use std::fs::File;
 use std::io::SeekFrom;
 use std::path::Path;
-use std::collections::HashMap;
+use std::time::Duration;
+use std::time::Instant;
 
 use async_trait::async_trait;
 use xtra_proc::actor;
@@ -80,21 +80,40 @@ impl StateManager {
     }
 
     #[handler]
-    async fn create(&mut self, stream_type: StreamType, file: String) -> Result<String> {
-        let session_id = uuid::Uuid::new_v4().to_hyphenated().to_string();
+    async fn create(
+        &mut self,
+        profile: &'static dyn TranscodingProfile,
+        profile_args: ProfileContext,
+    ) -> Result<String> {
+        let mut profile_args = profile_args;
 
-        let new_session = Session::new(
-            session_id.clone(),
-            file,
-            0,
-            format!("{}/{}", self.outdir.clone(), session_id),
-            stream_type,
-            self.ffmpeg.clone(),
+        let session_id = uuid::Uuid::new_v4().to_hyphenated().to_string();
+        let tag = if let Some(width) = profile_args.width {
+            let bitrate = profile_args
+                .bitrate
+                .map(|x| format!("@{}", x))
+                .unwrap_or_default();
+            let height = profile_args.height.unwrap_or(-2);
+
+            format!("{} ({}x{}{})", profile.tag(), width, height, bitrate)
+        } else {
+            let bitrate = profile_args
+                .bitrate
+                .map(|x| format!("@{}", x))
+                .unwrap_or_default();
+            format!("{}{}", profile.tag(), bitrate)
+        };
+
+        info!(
+            self.logger,
+            "New session {} map {} -> {}", &session_id, profile_args.stream, tag
         );
+        profile_args.outdir = format!("{}/{}", &self.outdir, session_id);
+        profile_args.ffmpeg_bin = self.ffmpeg.clone();
+
+        let new_session = Session::new(session_id.clone(), profile, profile_args);
 
         self.sessions.insert(session_id.clone(), new_session);
-
-        info!(self.logger, "New session {} ({})", &session_id, stream_type);
 
         Ok(session_id)
     }
@@ -182,7 +201,10 @@ impl StateManager {
 
             let log = self.logger.clone();
             let path = chunk_path.clone();
-            if let Err(e) = tokio::task::spawn_blocking(move || patch_segment(log, path, chunk)).await.unwrap() {
+            if let Err(e) = tokio::task::spawn_blocking(move || patch_segment(log, path, chunk))
+                .await
+                .unwrap()
+            {
                 warn!(self.logger, "Failed to patch segment."; "error" => e.to_string());
             }
 
@@ -392,12 +414,14 @@ fn patch_segment<T: AsRef<Path>>(log: slog::Logger, file: T, seq: u32) -> Result
     let styp = styp.ok_or(NightfallError::MissingSegmentBox)?;
     let sidx = sidx.ok_or(NightfallError::MissingSegmentBox)?;
     let mut moof = moof.ok_or(NightfallError::MissingSegmentBox)?;
-    let tfdt = moof.trafs[0].tfdt.as_mut().ok_or(NightfallError::MissingSegmentBox)?;
+    let tfdt = moof.trafs[0]
+        .tfdt
+        .as_mut()
+        .ok_or(NightfallError::MissingSegmentBox)?;
     let mdat = mdat.ok_or(NightfallError::MissingSegmentBox)?;
 
     moof.mfhd.sequence_number = seq;
     tfdt.base_media_decode_time = sidx.earliest_presentation_time + 5;
-
 
     let mut out = File::create(&file)?;
     styp.write_box(&mut out)?;

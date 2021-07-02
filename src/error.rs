@@ -18,7 +18,7 @@ pub enum NightfallError {
     #[error(display = "Io Error")]
     IoError,
     #[error(display = "Box missing in segment.")]
-    MissingSegmentBox
+    MissingSegmentBox,
 }
 
 impl From<mp4::Error> for NightfallError {

@@ -1,38 +1,32 @@
-use crate::profile::Profile;
-use crate::profile::StreamType;
+use crate::profiles::ProfileContext;
+use crate::profiles::StreamType;
+use crate::profiles::TranscodingProfile;
 
-use std::array::IntoIter;
 use std::collections::HashMap;
 use std::fmt;
 use std::fs;
+use std::fs::File;
 use std::io;
 use std::io::Read;
-
 use std::path::Path;
 use std::process::Stdio;
-
+use std::sync::Arc;
+use std::sync::RwLock;
 use std::time::Duration;
 use std::time::Instant;
 
-use std::fs::File;
-
-use std::sync::Arc;
-use std::sync::RwLock;
-
 use tokio::io::AsyncBufReadExt;
 use tokio::io::BufReader;
-
 use tokio::process::Child;
 use tokio::process::ChildStdout;
 use tokio::process::Command;
-
 use tokio::task::JoinHandle;
 
 use tokio_stream::wrappers::LinesStream;
 use tokio_stream::StreamExt;
 
 /// Length of a chunk in seconds.
-const CHUNK_SIZE: u32 = 5;
+pub const CHUNK_SIZE: u32 = 5;
 /// Represents how many chunks we encode before we require a timeout reset.
 /// Basically if within MAX_CHUNKS_AHEAD we do not get a timeout reset we kill the stream.
 /// This can be tuned
@@ -47,18 +41,14 @@ lazy_static::lazy_static! {
 
 pub struct Session {
     pub id: String,
-    file: String,
-    outdir: String,
-    ffmpeg_bin: String,
-    _process: Option<JoinHandle<()>>,
-
-    has_started: bool,
     pub paused: bool,
-    pub start_number: u32,
-    stream_type: StreamType,
+
+    profile: &'static dyn TranscodingProfile,
+    profile_ctx: ProfileContext,
+    _process: Option<JoinHandle<()>>,
+    has_started: bool,
     last_chunk: u32,
     hard_timeout: Instant,
-
     child_pid: Option<u32>,
     real_process: Option<Child>,
 }
@@ -66,20 +56,15 @@ pub struct Session {
 impl Session {
     pub fn new(
         id: String,
-        file: String,
-        start_number: u32,
-        outdir: String,
-        stream_type: StreamType,
-        ffmpeg_bin: String,
+        profile: &'static dyn TranscodingProfile,
+        profile_ctx: ProfileContext,
     ) -> Self {
-        std::fs::create_dir_all(&outdir).unwrap();
+        std::fs::create_dir_all(&profile_ctx.outdir).unwrap();
 
         Self {
             id,
-            outdir,
-            ffmpeg_bin,
-            stream_type,
-            start_number,
+            profile,
+            profile_ctx,
             last_chunk: 0,
             _process: None,
             paused: false,
@@ -87,7 +72,6 @@ impl Session {
             child_pid: None,
             real_process: None,
             hard_timeout: Instant::now() + Duration::from_secs(30 * 60),
-            file,
         }
     }
 
@@ -96,19 +80,21 @@ impl Session {
         self.has_started = true;
         self.paused = false;
 
-        let _ = fs::create_dir_all(self.outdir.clone());
-        let args = self.build_args();
+        let _ = fs::create_dir_all(&self.profile_ctx.outdir);
 
-        let log_file = format!("{}/ffmpeg.log", &self.outdir);
+        let args = self.profile.build(self.profile_ctx.clone()).unwrap();
+
+        let log_file = format!("{}/ffmpeg.log", &self.profile_ctx.outdir);
 
         let stderr: Stdio = File::create(log_file)?.into();
-        let stdout: Stdio = if let StreamType::Subtitle { .. } = self.stream_type {
-            File::create(format!("{}/stream.vtt", &self.outdir))?.into()
+
+        let stdout: Stdio = if self.profile.stream_type() == StreamType::Subtitle {
+            File::create(format!("{}/stream.vtt", &self.profile_ctx.outdir))?.into()
         } else {
             Stdio::piped()
         };
 
-        let mut process = Command::new(self.ffmpeg_bin.clone())
+        let mut process = Command::new(self.profile_ctx.ffmpeg_bin.clone())
             .stdout(stdout)
             .stderr(stderr)
             .args(args.as_slice())
@@ -116,10 +102,7 @@ impl Session {
 
         self.child_pid = process.id();
 
-        if !matches!(
-            self.stream_type,
-            StreamType::Subtitle { .. } | StreamType::RawVideo { .. }
-        ) {
+        if !self.profile_ctx.is_stdio_stream() {
             let stdout = process.stdout.take().unwrap();
             let stdout_parser_thread =
                 StdoutParser::new(self.id.clone(), stdout, self.child_pid.clone().unwrap());
@@ -140,65 +123,7 @@ impl Session {
     }
 
     pub fn start_num(&self) -> u32 {
-        self.start_number
-    }
-
-    fn build_args(&self) -> Vec<String> {
-        let mut args = IntoIter::new(["-fflags", "+genpts", "-y"])
-            .map(ToString::to_string)
-            .collect::<Vec<_>>();
-
-        if let StreamType::RawVideo { sseof, .. } = self.stream_type {
-            if let Some(sseof) = sseof {
-                args.append(&mut vec!["-sseof".into(), (-sseof).to_string()]);
-            }
-        } else {
-            args.append(&mut vec![
-                "-ss".into(),
-                (self.start_num() * CHUNK_SIZE).to_string(),
-            ])
-        }
-        args.append(&mut vec!["-i".into(), self.file.clone()]);
-
-        match self.stream_type {
-            StreamType::Audio { map, profile } => {
-                args.append(&mut vec![
-                    "-copyts".into(),
-                    "-map".into(),
-                    format!("0:{}", map),
-                ]);
-                args.append(&mut profile.to_args(self.start_num(), &self.outdir));
-            }
-            StreamType::Video { map, profile } => {
-                args.append(&mut vec![
-                    "-copyts".into(),
-                    "-map".into(),
-                    format!("0:{}", map),
-                ]);
-                args.append(&mut profile.to_args(self.start_num(), &self.outdir));
-            }
-            StreamType::Subtitle { map, profile } => {
-                args.append(&mut vec!["-map".into(), format!("0:{}", map)]);
-
-                args.append(&mut profile.to_args(0, &self.outdir));
-            }
-            StreamType::RawVideo {
-                map,
-                profile,
-                tt,
-                sseof,
-            } => {
-                args.append(&mut vec!["-map".into(), format!("0:{}", map)]);
-                if sseof.is_none() {
-                    if let Some(tt) = tt {
-                        args.append(&mut vec!["-t".into(), tt.to_string()]);
-                    }
-                }
-                args.append(&mut profile.to_args(0, &self.outdir));
-            }
-        }
-
-        args
+        self.profile_ctx.start_num
     }
 
     pub async fn join(&mut self) {
@@ -209,7 +134,7 @@ impl Session {
     }
 
     pub fn stderr(&mut self) -> Option<String> {
-        let file = format!("{}/ffmpeg.log", &self.outdir);
+        let file = format!("{}/ffmpeg.log", &self.profile_ctx.outdir);
 
         let mut buf = String::new();
         let _ = File::open(file).ok()?.read_to_string(&mut buf);
@@ -240,7 +165,7 @@ impl Session {
     }
 
     pub fn delete_tmp(&self) {
-        let _ = fs::remove_dir_all(self.outdir.clone());
+        let _ = fs::remove_dir_all(&self.profile_ctx.outdir);
     }
 
     pub fn is_dead(&self) -> bool {
@@ -275,7 +200,7 @@ impl Session {
     }
 
     pub fn current_chunk(&self) -> u32 {
-        let frame = match self.stream_type {
+        let frame = match self.profile.stream_type() {
             StreamType::Audio { .. } => {
                 self.get_key("out_time_us")
                     .map(|x| x.parse::<u64>().unwrap_or(0))
@@ -291,9 +216,9 @@ impl Session {
             _ => 0,
         } as u32;
 
-        match self.stream_type {
+        match self.profile.stream_type() {
             StreamType::Audio { .. } => (frame / (CHUNK_SIZE * 24)).max(self.last_chunk),
-            StreamType::Video { .. } => frame / (CHUNK_SIZE * 24) + self.start_number,
+            StreamType::Video { .. } => frame / (CHUNK_SIZE * 24) + self.profile_ctx.start_num,
             _ => 0,
         }
     }
@@ -322,15 +247,15 @@ impl Session {
     /// Method does some math magic to guess if a chunk has been fully written by ffmpeg yet
     /// only works when `ffmpeg` writes files to tmp then renames them.
     pub fn is_chunk_done(&self, chunk_num: u32) -> bool {
-        Path::new(&format!("{}/{}.m4s", &self.outdir, chunk_num)).is_file()
+        Path::new(&format!("{}/{}.m4s", &self.profile_ctx.outdir, chunk_num)).is_file()
     }
 
     pub fn subtitle(&self, file: String) -> Option<String> {
-        if !matches!(self.stream_type, StreamType::Subtitle { .. }) {
+        if !matches!(self.profile.stream_type(), StreamType::Subtitle) {
             return None;
         }
 
-        let file = format!("{}/{}", &self.outdir, file);
+        let file = format!("{}/{}", &self.profile_ctx.outdir, file);
         let path = Path::new(&file);
 
         // NOTE: This will not check if the ffmpeg process is dead, thus this will return immediately
@@ -351,11 +276,11 @@ impl Session {
     }
 
     pub fn chunk_to_path(&self, chunk_num: u32) -> String {
-        format!("{}/{}.m4s", self.outdir, chunk_num)
+        format!("{}/{}.m4s", self.profile_ctx.outdir, chunk_num)
     }
 
     pub fn init_seg(&self) -> String {
-        format!("{}/{}_init.mp4", self.outdir, self.start_num())
+        format!("{}/{}_init.mp4", self.profile_ctx.outdir, self.start_num())
     }
 
     pub fn has_started(&self) -> bool {
@@ -363,7 +288,7 @@ impl Session {
     }
 
     pub fn reset_to(&mut self, chunk: u32) {
-        self.start_number = chunk;
+        self.profile_ctx.start_num = chunk;
         self._process = None;
         self.last_chunk = chunk;
         self.has_started = false;
@@ -376,7 +301,7 @@ impl fmt::Debug for Session {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Session")
             .field("id", &self.id)
-            .field("start_number", &self.start_number)
+            .field("start_number", &self.profile_ctx.start_num)
             .field("last_chunk", &self.last_chunk)
             .finish()
     }
