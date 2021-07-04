@@ -4,9 +4,7 @@ use super::StreamType;
 use super::TranscodingProfile;
 
 use crate::session::CHUNK_SIZE;
-
-use slog::warn;
-use slog::info;
+use crate::NightfallError;
 
 pub struct H264TransmuxProfile;
 
@@ -302,33 +300,17 @@ impl TranscodingProfile for VaapiTranscodeProfile {
         "VaapiTranscodeProfile"
     }
 
-    fn is_enabled(&self, log: &slog::Logger) -> bool {
-        let vainfo = match rusty_vainfo::VaInstance::new() {
-            Ok(x) => x,
-            Err(_) => {
-                warn!(log,
-                    "Disabling profile";
-                    "reason" => "Failed to grab VaInstance",
-                    "profile" => self.name(),
-                );
-                return false;
-            }
-        };
+    fn is_enabled(&self) -> Result<(), NightfallError> {
+        let vainfo = rusty_vainfo::VaInstance::new().map_err(|_| {
+            NightfallError::ProfileNotSupported(format!("Failed to grab VaInstance"))
+        })?;
 
-        let profiles = match vainfo.profiles() {
-            Ok(x) => x,
-            Err(_) => {
-                let vendor_string = vainfo.vendor_string();
-                warn!(
-                    log,
-                    "Disabling profile";
-                    "reason" => "Failed to get supported profiles",
-                    "profile" => self.name(),
-                    "extra" => vendor_string
-                );
-                return false;
-            }
-        };
+        let profiles = vainfo.profiles().map_err(|_| {
+            NightfallError::ProfileNotSupported(format!(
+                "Failed to get supported profiles for device: {}",
+                vainfo.vendor_string()
+            ))
+        })?;
 
         let required_features = ["VAEntrypointEncSlice", "VAEntrypointVLD"];
 
@@ -339,36 +321,29 @@ impl TranscodingProfile for VaapiTranscodeProfile {
         ];
 
         for profile in required_profiles {
-            let device_profile = match profiles.iter().find(|x| x.name == profile) {
-                Some(x) => x,
-                None => {
-                    warn!(log, "Disabling profile";
-                        "reason" => "Device doesnt support profile.",
-                        "profile" => self.name(),
-                        "device_profile" => profile,
-                        "available_profiles" => profiles.iter().map(|x| x.name.clone()).collect::<Vec<_>>().join(" | ")
-                    );
-                    return false;
-                }
-            };
+            let device_profile = profiles.iter().find(|x| x.name == profile).ok_or(
+                NightfallError::ProfileNotSupported(format!(
+                    "Device {} doesnt support profile {} (Supported profiles: {})",
+                    vainfo.vendor_string(),
+                    profile,
+                    profiles
+                        .iter()
+                        .map(|x| x.name.clone())
+                        .collect::<Vec<_>>()
+                        .join(" | ")
+                )),
+            )?;
 
             for feature in required_features {
                 if !device_profile.entrypoints.contains(&feature.to_string()) {
-                    warn!(log, "Disabling profile";
-                        "reason" => "Device doesnt support profile.",
-                        "profile" => self.name(), 
-                        "device_profile" => device_profile.name.clone(),
-                        "feature" => feature,
-                        "available_features" => device_profile.entrypoints.join(" | ")
-                    );
-                    return false;
+                    return Err(NightfallError::ProfileNotSupported(format!(
+                        "Profile {} for device {} doesnt support feature {} (Supported features: {})",
+                        profile, vainfo.vendor_string(), feature.to_string(), device_profile.entrypoints.join(" | "))));
                 }
             }
         }
 
-        info!(log, "Enabling profile"; "profile" => self.name(), "vendor" => vainfo.vendor_string());
-
-        true
+        Ok(())
     }
 
     fn build(&self, ctx: ProfileContext) -> Option<Vec<String>> {

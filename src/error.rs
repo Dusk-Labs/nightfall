@@ -19,6 +19,8 @@ pub enum NightfallError {
     IoError,
     #[error(display = "Box missing in segment.")]
     MissingSegmentBox,
+    #[error(display = "Profile not supported {}", 0)]
+    ProfileNotSupported(String),
 }
 
 impl From<mp4::Error> for NightfallError {

@@ -10,6 +10,7 @@ pub use video::RawVideoTranscodeProfile;
 pub use video::VaapiTranscodeProfile;
 
 use std::lazy::SyncOnceCell;
+use crate::NightfallError;
 
 static PROFILES: SyncOnceCell<Vec<Box<dyn TranscodingProfile>>> = SyncOnceCell::new();
 
@@ -27,7 +28,13 @@ pub fn profiles_init(log: slog::Logger, _ffmpeg_bin: String) {
     let _ = PROFILES.set(
         profiles
             .into_iter()
-            .filter(|x| x.is_enabled(&log))
+            .filter(|x| if let Err(e) = x.is_enabled() {
+                slog::warn!(&log, "Disabling profile"; "profile" => x.name(), "reason" => e.to_string());
+                false
+            } else {
+                slog::info!(&log, "Enabling profile"; "profile" => x.name());
+                true
+            })
             .collect(),
     );
 }
@@ -61,9 +68,8 @@ pub trait TranscodingProfile: Send + Sync + 'static {
     /// By default this function is auto-implemented to return `true`, however for complex
     /// profiles such as VAAPI we may want at run-time to check whether ffmpeg will actually
     /// transcode the given file.
-    fn is_enabled(&self, log: &slog::Logger) -> bool {
-        slog::info!(log, "Enabling profile"; "profile" => self.name());
-        true
+    fn is_enabled(&self) -> Result<(), NightfallError> {
+        Ok(())
     }
 
     /// Function will build a list of arguments to be passed to ffmpeg for the profile which
