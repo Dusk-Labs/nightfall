@@ -13,17 +13,23 @@ use std::lazy::SyncOnceCell;
 
 static PROFILES: SyncOnceCell<Vec<Box<dyn TranscodingProfile>>> = SyncOnceCell::new();
 
-pub fn profiles_init(_ffmpeg_bin: String) {
+pub fn profiles_init(log: slog::Logger, _ffmpeg_bin: String) {
     let profiles: Vec<Box<dyn TranscodingProfile>> = vec![
         box AacTranscodeProfile,
         box H264TranscodeProfile,
         box H264TransmuxProfile,
         box RawVideoTranscodeProfile,
         box WebvttTranscodeProfile,
+        #[cfg(unix)]
         box VaapiTranscodeProfile,
     ];
 
-    let _ = PROFILES.set(profiles.into_iter().filter(|x| x.is_enabled()).collect());
+    let _ = PROFILES.set(
+        profiles
+            .into_iter()
+            .filter(|x| x.is_enabled(&log))
+            .collect(),
+    );
 }
 
 pub fn get_profile_for(
@@ -55,7 +61,8 @@ pub trait TranscodingProfile: Send + Sync + 'static {
     /// By default this function is auto-implemented to return `true`, however for complex
     /// profiles such as VAAPI we may want at run-time to check whether ffmpeg will actually
     /// transcode the given file.
-    fn is_enabled(&self) -> bool {
+    fn is_enabled(&self, log: &slog::Logger) -> bool {
+        slog::info!(log, "Enabling profile"; "profile" => self.name());
         true
     }
 
@@ -69,8 +76,13 @@ pub trait TranscodingProfile: Send + Sync + 'static {
     /// a direct conversion betwen`codec_in` and `codec_out` is possible.
     fn supports(&self, _codec_in: &str, codec_out: &str) -> bool;
 
+    /// Return tag of this profile.
     fn tag(&self) -> &str;
 
+    /// Return name of this profile.
+    fn name(&self) -> &str;
+
+    /// Function will return whether this profile emit data over stdout instead of progress information.
     fn is_stdio_stream(&self) -> bool {
         false
     }

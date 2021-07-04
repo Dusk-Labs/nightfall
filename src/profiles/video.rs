@@ -5,6 +5,9 @@ use super::TranscodingProfile;
 
 use crate::session::CHUNK_SIZE;
 
+use slog::warn;
+use slog::info;
+
 pub struct H264TransmuxProfile;
 
 impl TranscodingProfile for H264TransmuxProfile {
@@ -14,6 +17,10 @@ impl TranscodingProfile for H264TransmuxProfile {
 
     fn stream_type(&self) -> StreamType {
         StreamType::Video
+    }
+
+    fn name(&self) -> &str {
+        "H264TransmuxProfile"
     }
 
     fn build(&self, ctx: ProfileContext) -> Option<Vec<String>> {
@@ -109,6 +116,10 @@ impl TranscodingProfile for H264TranscodeProfile {
 
     fn stream_type(&self) -> StreamType {
         StreamType::Video
+    }
+
+    fn name(&self) -> &str {
+        "H264TranscodeProfile"
     }
 
     fn build(&self, ctx: ProfileContext) -> Option<Vec<String>> {
@@ -215,6 +226,10 @@ impl TranscodingProfile for RawVideoTranscodeProfile {
         StreamType::Video
     }
 
+    fn name(&self) -> &str {
+        "RawVideoTranscodeProfile"
+    }
+
     fn build(&self, ctx: ProfileContext) -> Option<Vec<String>> {
         let mut args = vec!["-y".into()];
 
@@ -270,8 +285,10 @@ impl TranscodingProfile for RawVideoTranscodeProfile {
     }
 }
 
+#[cfg(unix)]
 pub struct VaapiTranscodeProfile;
 
+#[cfg(unix)]
 impl TranscodingProfile for VaapiTranscodeProfile {
     fn profile_type(&self) -> ProfileType {
         ProfileType::HardwareTranscode
@@ -279,6 +296,79 @@ impl TranscodingProfile for VaapiTranscodeProfile {
 
     fn stream_type(&self) -> StreamType {
         StreamType::Video
+    }
+
+    fn name(&self) -> &str {
+        "VaapiTranscodeProfile"
+    }
+
+    fn is_enabled(&self, log: &slog::Logger) -> bool {
+        let vainfo = match rusty_vainfo::VaInstance::new() {
+            Ok(x) => x,
+            Err(_) => {
+                warn!(log,
+                    "Disabling profile";
+                    "reason" => "Failed to grab VaInstance",
+                    "profile" => self.name(),
+                );
+                return false;
+            }
+        };
+
+        let profiles = match vainfo.profiles() {
+            Ok(x) => x,
+            Err(_) => {
+                let vendor_string = vainfo.vendor_string();
+                warn!(
+                    log,
+                    "Disabling profile";
+                    "reason" => "Failed to get supported profiles",
+                    "profile" => self.name(),
+                    "extra" => vendor_string
+                );
+                return false;
+            }
+        };
+
+        let required_features = ["VAEntrypointEncSlice", "VAEntrypointVLD"];
+
+        let required_profiles = [
+            "VAProfileH264ConstrainedBaseline",
+            "VAProfileH264Main",
+            "VAProfileH264High",
+        ];
+
+        for profile in required_profiles {
+            let device_profile = match profiles.iter().find(|x| x.name == profile) {
+                Some(x) => x,
+                None => {
+                    warn!(log, "Disabling profile";
+                        "reason" => "Device doesnt support profile.",
+                        "profile" => self.name(),
+                        "device_profile" => profile,
+                        "available_profiles" => profiles.iter().map(|x| x.name.clone()).collect::<Vec<_>>().join(" | ")
+                    );
+                    return false;
+                }
+            };
+
+            for feature in required_features {
+                if !device_profile.entrypoints.contains(&feature.to_string()) {
+                    warn!(log, "Disabling profile";
+                        "reason" => "Device doesnt support profile.",
+                        "profile" => self.name(), 
+                        "device_profile" => device_profile.name.clone(),
+                        "feature" => feature,
+                        "available_features" => device_profile.entrypoints.join(" | ")
+                    );
+                    return false;
+                }
+            }
+        }
+
+        info!(log, "Enabling profile"; "profile" => self.name(), "vendor" => vainfo.vendor_string());
+
+        true
     }
 
     fn build(&self, ctx: ProfileContext) -> Option<Vec<String>> {
@@ -318,7 +408,7 @@ impl TranscodingProfile for VaapiTranscodeProfile {
             "-g".into(),
             "120".into(),
             "-vf".into(),
-            "format=nv12,hwupload".into(),
+            "hwdownload,format=nv12,hwupload".into(),
             "-frag_duration".into(),
             "5000000".into(),
             "-movflags".into(),

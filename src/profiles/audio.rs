@@ -16,6 +16,10 @@ impl TranscodingProfile for AacTranscodeProfile {
         StreamType::Audio
     }
 
+    fn name(&self) -> &str {
+        "AacTranscodeProfile"
+    }
+
     fn build(&self, ctx: ProfileContext) -> Option<Vec<String>> {
         let start_num = ctx.start_num.to_string();
         let stream = format!("0:{}", ctx.stream);

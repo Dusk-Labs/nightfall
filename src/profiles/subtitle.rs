@@ -14,6 +14,10 @@ impl TranscodingProfile for WebvttTranscodeProfile {
         StreamType::Subtitle
     }
 
+    fn name(&self) -> &str {
+        "WebvttTranscodeProfile"
+    }
+
     fn build(&self, ctx: ProfileContext) -> Option<Vec<String>> {
         let args = vec![
             "-y".into(),
