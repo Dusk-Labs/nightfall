@@ -21,19 +21,19 @@ impl TranscodingProfile for AacTranscodeProfile {
     }
 
     fn build(&self, ctx: ProfileContext) -> Option<Vec<String>> {
-        let start_num = ctx.start_num.to_string();
-        let stream = format!("0:{}", ctx.stream);
+        let start_num = ctx.output_ctx.start_num.to_string();
+        let stream = format!("0:{}", ctx.input_ctx.stream);
         let init_seg = format!("{}_init.mp4", &start_num);
-        let seg_name = format!("{}/%d.m4s", ctx.outdir);
-        let outdir = format!("{}/playlist.m3u8", ctx.outdir);
+        let seg_name = format!("{}/%d.m4s", ctx.output_ctx.outdir);
+        let outdir = format!("{}/playlist.m3u8", ctx.output_ctx.outdir);
 
         // NOTE: might need flags -fflages +genpts if seeking breaks.
         let mut args = vec![
             "-y".into(),
             "-ss".into(),
-            (ctx.start_num * CHUNK_SIZE).to_string(),
+            (ctx.output_ctx.start_num * CHUNK_SIZE).to_string(),
             "-i".into(),
-            ctx.file,
+            ctx.input_ctx.file,
             "-copyts".into(),
             "-map".into(),
             stream,
@@ -42,9 +42,9 @@ impl TranscodingProfile for AacTranscodeProfile {
             "-ac".into(),
         ];
 
-        let ac = ctx.audio_channels.to_string();
+        let ac = ctx.output_ctx.audio_channels.to_string();
         args.push(ac);
-        let ab = ctx.bitrate.unwrap_or(120_000).to_string();
+        let ab = ctx.output_ctx.bitrate.unwrap_or(120_000).to_string();
         args.push("-ab".into());
         args.push(ab);
 

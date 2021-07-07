@@ -1,13 +1,16 @@
 pub mod audio;
 pub mod subtitle;
 pub mod video;
+#[cfg(unix)]
+pub mod vaapi;
 
 pub use audio::AacTranscodeProfile;
 pub use subtitle::WebvttTranscodeProfile;
 pub use video::H264TranscodeProfile;
 pub use video::H264TransmuxProfile;
 pub use video::RawVideoTranscodeProfile;
-pub use video::VaapiTranscodeProfile;
+#[cfg(unix)]
+pub use vaapi::VaapiTranscodeProfile;
 
 use std::lazy::SyncOnceCell;
 use crate::NightfallError;
@@ -22,7 +25,7 @@ pub fn profiles_init(log: slog::Logger, _ffmpeg_bin: String) {
         box RawVideoTranscodeProfile,
         box WebvttTranscodeProfile,
         #[cfg(unix)]
-        box VaapiTranscodeProfile,
+        box VaapiTranscodeProfile::default(),
     ];
 
     let _ = PROFILES.set(
@@ -97,35 +100,70 @@ pub trait TranscodingProfile: Send + Sync + 'static {
 /// A context which contains information we may need when building the ffmpeg arguments.
 #[derive(Clone, Debug)]
 pub struct ProfileContext {
-    pub stream: usize,
     pub pre_args: Vec<String>,
-    pub start_num: u32,
-    pub file: String,
-    pub outdir: String,
-    pub seek: Option<i64>,
-    pub max_to_transcode: Option<u64>,
+    pub input_ctx: InputCtx,
+    pub output_ctx: OutputCtx,
+    pub ffmpeg_bin: String,
+}
 
+#[derive(Clone, Debug)]
+pub struct InputCtx {
+    pub file: String,
+    pub stream: usize,
+    pub codec: String,
+    pub pix_fmt: String,
+    pub profile: String,
+    pub fps: f64,
+    pub bitrate: u64,
+    pub seek: Option<i64>,
+}
+
+impl Default for InputCtx {
+    fn default() -> Self {
+        Self {
+            file: String::new(),
+            stream: 0,
+            codec: String::new(),
+            pix_fmt: String::new(),
+            profile: String::new(),
+            fps: 0.0,
+            bitrate: 0,
+            seek: None,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct OutputCtx {
+    pub start_num: u32,
+    pub outdir: String,
+    pub max_to_transcode: Option<u64>,
     pub bitrate: Option<u64>,
     pub height: Option<i64>,
     pub width: Option<i64>,
     pub audio_channels: u64,
-    pub ffmpeg_bin: String,
 }
 
-impl Default for ProfileContext {
+impl Default for OutputCtx {
     fn default() -> Self {
         Self {
-            stream: 0,
-            pre_args: Vec::new(),
             start_num: 0,
-            file: String::new(),
             outdir: String::new(),
-            seek: None,
             max_to_transcode: None,
             bitrate: None,
             height: None,
             width: None,
             audio_channels: 2,
+        }
+    }
+}
+
+impl Default for ProfileContext {
+    fn default() -> Self {
+        Self {
+            pre_args: Vec::new(),
+            input_ctx: Default::default(),
+            output_ctx: Default::default(),
             ffmpeg_bin: "ffmpeg".into(),
         }
     }

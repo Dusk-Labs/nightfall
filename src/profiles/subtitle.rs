@@ -22,9 +22,9 @@ impl TranscodingProfile for WebvttTranscodeProfile {
         let args = vec![
             "-y".into(),
             "-i".into(),
-            ctx.file,
+            ctx.input_ctx.file,
             "-map".into(),
-            format!("0:{}", ctx.stream),
+            format!("0:{}", ctx.input_ctx.stream),
             "-f".into(),
             "webvtt".into(),
             "-".into(),
