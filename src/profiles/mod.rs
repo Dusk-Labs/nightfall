@@ -1,19 +1,20 @@
 pub mod audio;
 pub mod subtitle;
-pub mod video;
 #[cfg(unix)]
 pub mod vaapi;
+pub mod video;
 
 pub use audio::AacTranscodeProfile;
 pub use subtitle::WebvttTranscodeProfile;
+pub use subtitle::AssExtractProfile;
+#[cfg(unix)]
+pub use vaapi::VaapiTranscodeProfile;
 pub use video::H264TranscodeProfile;
 pub use video::H264TransmuxProfile;
 pub use video::RawVideoTranscodeProfile;
-#[cfg(unix)]
-pub use vaapi::VaapiTranscodeProfile;
 
-use std::lazy::SyncOnceCell;
 use crate::NightfallError;
+use std::lazy::SyncOnceCell;
 
 static PROFILES: SyncOnceCell<Vec<Box<dyn TranscodingProfile>>> = SyncOnceCell::new();
 
@@ -24,6 +25,7 @@ pub fn profiles_init(log: slog::Logger, _ffmpeg_bin: String) {
         box H264TransmuxProfile,
         box RawVideoTranscodeProfile,
         box WebvttTranscodeProfile,
+        box AssExtractProfile,
         #[cfg(unix)]
         box VaapiTranscodeProfile::default(),
     ];
@@ -43,15 +45,20 @@ pub fn profiles_init(log: slog::Logger, _ffmpeg_bin: String) {
 }
 
 pub fn get_profile_for(
+    log: &slog::Logger,
     stream_type: StreamType,
-    codec_in: &str,
-    codec_out: &str,
+    ctx: &ProfileContext,
 ) -> Vec<&'static dyn TranscodingProfile> {
     let mut profiles: Vec<_> = PROFILES
         .get()
         .expect("nightfall::PROFILES not initialized.")
         .iter()
-        .filter(|x| x.stream_type() == stream_type && x.supports(codec_in, codec_out))
+        .filter(|x| x.stream_type() == stream_type && if let Err(e) = x.supports(ctx) {
+            slog::debug!(log, "Profile not supported for ctx"; "profile" => x.name(), "reason" => e.to_string());
+            false
+        } else {
+            true
+        })
         .map(AsRef::as_ref)
         .collect();
 
@@ -83,7 +90,7 @@ pub trait TranscodingProfile: Send + Sync + 'static {
     /// Function will return whether the conversion to `codec_out` is possible. Some
     /// implementations of this function (HWAccelerated profiles) will also check whether
     /// a direct conversion betwen`codec_in` and `codec_out` is possible.
-    fn supports(&self, _codec_in: &str, codec_out: &str) -> bool;
+    fn supports(&self, ctx: &ProfileContext) -> Result<(), NightfallError>;
 
     /// Return tag of this profile.
     fn tag(&self) -> &str;
@@ -100,6 +107,7 @@ pub trait TranscodingProfile: Send + Sync + 'static {
 /// A context which contains information we may need when building the ffmpeg arguments.
 #[derive(Clone, Debug)]
 pub struct ProfileContext {
+    pub file: String,
     pub pre_args: Vec<String>,
     pub input_ctx: InputCtx,
     pub output_ctx: OutputCtx,
@@ -108,11 +116,11 @@ pub struct ProfileContext {
 
 #[derive(Clone, Debug)]
 pub struct InputCtx {
-    pub file: String,
     pub stream: usize,
     pub codec: String,
     pub pix_fmt: String,
     pub profile: String,
+    pub bframes: Option<u64>,
     pub fps: f64,
     pub bitrate: u64,
     pub seek: Option<i64>,
@@ -121,11 +129,11 @@ pub struct InputCtx {
 impl Default for InputCtx {
     fn default() -> Self {
         Self {
-            file: String::new(),
             stream: 0,
             codec: String::new(),
             pix_fmt: String::new(),
             profile: String::new(),
+            bframes: None,
             fps: 0.0,
             bitrate: 0,
             seek: None,
@@ -135,6 +143,7 @@ impl Default for InputCtx {
 
 #[derive(Clone, Debug)]
 pub struct OutputCtx {
+    pub codec: String,
     pub start_num: u32,
     pub outdir: String,
     pub max_to_transcode: Option<u64>,
@@ -147,6 +156,7 @@ pub struct OutputCtx {
 impl Default for OutputCtx {
     fn default() -> Self {
         Self {
+            codec: String::new(),
             start_num: 0,
             outdir: String::new(),
             max_to_transcode: None,
@@ -161,6 +171,7 @@ impl Default for OutputCtx {
 impl Default for ProfileContext {
     fn default() -> Self {
         Self {
+            file: String::new(),
             pre_args: Vec::new(),
             input_ctx: Default::default(),
             output_ctx: Default::default(),

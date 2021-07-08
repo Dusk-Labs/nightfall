@@ -25,9 +25,7 @@ impl Default for VaapiTranscodeProfile {
             ("<null_device>".to_string(), Default::default())
         };
 
-        Self {
-            profiles, vendor
-        }
+        Self { profiles, vendor }
     }
 }
 
@@ -52,12 +50,15 @@ impl TranscodingProfile for VaapiTranscodeProfile {
         // NOTE: These could technically be less restrictive and we could match for them inside
         // build. Although I doubt that there are actually any devices that dont support all three
         // of these profiles.
+        // see: https://github.com/intel/libva/blob/6e86b4fb4dafa123b1e31821f61da88f10cfbe91/va/va.h#L493
         let required_profiles = [
             "VAProfileH264ConstrainedBaseline",
             "VAProfileH264Main",
             "VAProfileH264High",
         ];
 
+        // FIXME: We want to enable this profile if any of the above profiles are enabled for those
+        // required features.
         for profile in required_profiles {
             let device_profile = self.profiles.iter().find(|x| x.name == profile).ok_or(
                 NightfallError::ProfileNotSupported(format!(
@@ -74,14 +75,19 @@ impl TranscodingProfile for VaapiTranscodeProfile {
 
             for feature in required_features {
                 if !device_profile.entrypoints.contains(&feature.to_string()) {
-                    return Err(NightfallError::ProfileNotSupported(format!(
-                        "Profile {} for device {} doesnt support feature {} (Supported features: {})",
-                        profile, self.vendor, feature.to_string(), device_profile.entrypoints.join(" | "))));
+                    continue;
                 }
             }
+
+            // we really only care if one of the profiles supports both enc+dec as this step only
+            // checks whether the device supports hw decoding in general.
+            return Ok(());
         }
 
-        Ok(())
+        Err(NightfallError::ProfileNotSupported(format!(
+            "Device {} doesnt seem to support hardware transcoding.",
+            self.vendor
+        )))
     }
 
     fn build(&self, ctx: ProfileContext) -> Option<Vec<String>> {
@@ -100,7 +106,7 @@ impl TranscodingProfile for VaapiTranscodeProfile {
             "-ss".into(),
             (ctx.output_ctx.start_num * CHUNK_SIZE).to_string(),
             "-i".into(),
-            ctx.input_ctx.file,
+            ctx.file,
             "-copyts".into(),
             "-map".into(),
             stream,
@@ -177,8 +183,32 @@ impl TranscodingProfile for VaapiTranscodeProfile {
 
     /// This profile technically could work on any codec since the codec is just `copy` here, but
     /// the container doesnt support it, so we will be constricting it down.
-    fn supports(&self, codec_in: &str, codec_out: &str) -> bool {
-        codec_in == codec_out && codec_in == "h264"
+    fn supports(&self, ctx: &ProfileContext) -> Result<(), NightfallError> {
+        if ctx.input_ctx.codec != ctx.output_ctx.codec || ctx.input_ctx.codec != "h264" {
+            return Err(NightfallError::ProfileNotSupported(
+                "Profile only supports h264 input and output streams.".into(),
+            ));
+        }
+
+        let profile = match ctx.input_ctx.profile.as_str() {
+            "High" => "VAProfileH264High",
+            "Main" => "VAProfileH264Main",
+            "Baseline" => "VAProfileH264Baseline",
+            _ => {
+                return Err(NightfallError::ProfileNotSupported(
+                    "Profile not supported by device.".into(),
+                ))
+            }
+        };
+
+        if self.profiles.iter().find(|x| x.name == profile).is_none() {
+            return Err(NightfallError::ProfileNotSupported(format!(
+                "Profile {} not supported by device.",
+                profile
+            )));
+        }
+
+        Ok(())
     }
 
     fn tag(&self) -> &str {

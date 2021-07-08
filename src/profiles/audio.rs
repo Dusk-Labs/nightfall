@@ -3,6 +3,7 @@ use super::ProfileType;
 use super::StreamType;
 use super::TranscodingProfile;
 
+use crate::error::NightfallError;
 use crate::session::CHUNK_SIZE;
 
 pub struct AacTranscodeProfile;
@@ -33,7 +34,7 @@ impl TranscodingProfile for AacTranscodeProfile {
             "-ss".into(),
             (ctx.output_ctx.start_num * CHUNK_SIZE).to_string(),
             "-i".into(),
-            ctx.input_ctx.file,
+            ctx.file,
             "-copyts".into(),
             "-map".into(),
             stream,
@@ -101,8 +102,14 @@ impl TranscodingProfile for AacTranscodeProfile {
         Some(args)
     }
 
-    fn supports(&self, _: &str, codec_out: &str) -> bool {
-        codec_out == "aac"
+    fn supports(&self, ctx: &ProfileContext) -> Result<(), NightfallError> {
+        if ctx.output_ctx.codec == "aac" {
+            return Ok(());
+        }
+
+        Err(NightfallError::ProfileNotSupported(
+            "Profile not supported.".into(),
+        ))
     }
 
     fn tag(&self) -> &str {

@@ -33,7 +33,7 @@ impl TranscodingProfile for H264TransmuxProfile {
             "-ss".into(),
             (ctx.output_ctx.start_num * CHUNK_SIZE).to_string(),
             "-i".into(),
-            ctx.input_ctx.file,
+            ctx.file,
             "-copyts".into(),
             "-map".into(),
             stream,
@@ -96,8 +96,18 @@ impl TranscodingProfile for H264TransmuxProfile {
 
     /// This profile technically could work on any codec since the codec is just `copy` here, but
     /// the container doesnt support it, so we will be constricting it down.
-    fn supports(&self, codec_in: &str, codec_out: &str) -> bool {
-        codec_in == codec_out && codec_in == "h264"
+    fn supports(&self, ctx: &ProfileContext) -> Result<(), NightfallError> {
+        if ctx.input_ctx.bframes.unwrap_or(0) != 0 {
+            return Err(NightfallError::ProfileNotSupported("Transmuxing streams containing b-frames is currently not supported.".into()));
+        }
+
+        if ctx.input_ctx.codec == ctx.output_ctx.codec && ctx.input_ctx.codec == "h264" {
+            return Ok(());
+        }
+
+        Err(NightfallError::ProfileNotSupported(
+            "Profile only supports h264 input and output codecs.".into(),
+        ))
     }
 
     fn tag(&self) -> &str {
@@ -132,7 +142,7 @@ impl TranscodingProfile for H264TranscodeProfile {
             "-ss".into(),
             (ctx.output_ctx.start_num * CHUNK_SIZE).to_string(),
             "-i".into(),
-            ctx.input_ctx.file,
+            ctx.file,
             "-copyts".into(),
             "-map".into(),
             stream,
@@ -140,6 +150,11 @@ impl TranscodingProfile for H264TranscodeProfile {
             "libx264".into(),
             "-preset".into(),
             "veryfast".into(),
+            // FIXME: Basically atm when we patch the segments before returning to the user we
+            // modify DTS to be correct otherwise when seeking the player breaks on chrome. Now the
+            // issue is that when we have B-frames PTS != DTS so we must calculate it properly.
+            "-x264-params".into(),
+            "bframes=0".into()
         ];
 
         if let Some(height) = ctx.output_ctx.height {
@@ -204,8 +219,15 @@ impl TranscodingProfile for H264TranscodeProfile {
         Some(args)
     }
 
-    fn supports(&self, _: &str, codec_out: &str) -> bool {
-        codec_out == "h264"
+    fn supports(&self, ctx: &ProfileContext) -> Result<(), NightfallError> {
+        if ctx.output_ctx.codec == "h264" {
+            return Ok(());
+        }
+
+        Err(NightfallError::ProfileNotSupported(format!(
+            "Got output codec {} but profile only supports `h264`.",
+            ctx.output_ctx.codec
+        )))
     }
 
     fn tag(&self) -> &str {
@@ -247,7 +269,10 @@ impl TranscodingProfile for RawVideoTranscodeProfile {
             args.push(max_to_transcode.to_string());
         }
 
-        args.append(&mut vec!["-map".into(), format!("0:{}", ctx.input_ctx.stream)]);
+        args.append(&mut vec![
+            "-map".into(),
+            format!("0:{}", ctx.input_ctx.stream),
+        ]);
         args.append(&mut vec!["-c:v".into(), "rawvideo".into()]);
         args.append(&mut vec![
             "-flags2".into(),
@@ -270,8 +295,15 @@ impl TranscodingProfile for RawVideoTranscodeProfile {
         Some(args)
     }
 
-    fn supports(&self, _: &str, codec_out: &str) -> bool {
-        codec_out == "rawvideo"
+    fn supports(&self, ctx: &ProfileContext) -> Result<(), NightfallError> {
+        if ctx.output_ctx.codec == "rawvideo" {
+            return Ok(());
+        }
+
+        Err(NightfallError::ProfileNotSupported(format!(
+            "Codec {} is not supported.",
+            ctx.output_ctx.codec
+        )))
     }
 
     fn tag(&self) -> &str {

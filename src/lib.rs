@@ -27,6 +27,7 @@ use std::collections::VecDeque;
 use std::fs::File;
 use std::io::prelude::*;
 use std::io::BufReader;
+use std::io::Seek;
 use std::io::SeekFrom;
 use std::path::Path;
 use std::time::Duration;
@@ -95,16 +96,18 @@ impl StateManager {
         let mut profile_args = profile_args;
 
         let session_id = uuid::Uuid::new_v4().to_hyphenated().to_string();
-        let tag = if let Some(width) = profile_args.width {
+        let tag = if let Some(width) = profile_args.output_ctx.width {
             let bitrate = profile_args
+                .output_ctx
                 .bitrate
                 .map(|x| format!("@{}", x))
                 .unwrap_or_default();
-            let height = profile_args.height.unwrap_or(-2);
+            let height = profile_args.output_ctx.height.unwrap_or(-2);
 
             format!("{} ({}x{}{})", profile.tag(), width, height, bitrate)
         } else {
             let bitrate = profile_args
+                .output_ctx
                 .bitrate
                 .map(|x| format!("@{}", x))
                 .unwrap_or_default();
@@ -113,10 +116,10 @@ impl StateManager {
 
         info!(
             self.logger,
-            "New session {} map {} -> {}", &session_id, profile_args.stream, tag
+            "New session {} map {} -> {}", &session_id, profile_args.input_ctx.stream, tag
         );
 
-        profile_args.outdir = format!("{}/{}", &self.outdir, session_id);
+        profile_args.output_ctx.outdir = format!("{}/{}", &self.outdir, session_id);
         profile_args.ffmpeg_bin = self.ffmpeg.clone();
 
         let new_session = Session::new(session_id.clone(), profile, profile_args);
@@ -152,6 +155,23 @@ impl StateManager {
         }
 
         if session.is_chunk_done(chunk) {
+            let log = self.logger.clone();
+            let init = session.init_seg();
+            let next = session.chunk_to_path(session.start_num());
+            let real_segment = session.real_segment;
+
+            match tokio::task::spawn_blocking(move || {
+                patch_init_segment(log, init, next, real_segment)
+            })
+            .await
+            .unwrap()
+            {
+                Ok(seq) => session.real_segment = seq,
+                Err(e) => {
+                    warn!(self.logger, "Failed to patch init segment."; "error" => e.to_string())
+                }
+            }
+
             return Ok(session.init_seg());
         }
 
@@ -376,7 +396,7 @@ impl StateManager {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct Segment {
     pub styp: Option<FtypBox>,
     pub sidx: Option<SidxBox>,
@@ -385,6 +405,62 @@ pub struct Segment {
 }
 
 impl Segment {
+    pub fn debug(&self) {
+        println!("styp: {:?}", self.styp);
+        println!("sidx: {:?}", self.sidx);
+        println!("moof: {:?}", self.moof);
+        println!(
+            "mdat: {:?}",
+            self.mdat.as_ref().map(|x| x.data.len()).unwrap_or(0)
+        );
+    }
+
+    pub fn parse(
+        mut reader: impl BufRead + Seek,
+        size: u64,
+        log: slog::Logger,
+    ) -> Result<VecDeque<Self>> {
+        let mut segments = VecDeque::new();
+        let start = reader.seek(SeekFrom::Current(0))?;
+
+        let mut current = start;
+        let mut current_segment = Self::default();
+
+        while current < size {
+            let header = BoxHeader::read(&mut reader)?;
+            let BoxHeader { name, size: s } = header;
+
+            match name {
+                BoxType::SidxBox => {
+                    current_segment.sidx = Some(SidxBox::read_box(&mut reader, s)?);
+                }
+                BoxType::MoofBox => {
+                    current_segment.moof = Some(MoofBox::read_box(&mut reader, s)?);
+                }
+                BoxType::MdatBox => {
+                    current_segment.mdat = Some(MdatBox::read_box(&mut reader, s)?);
+                    // mdat is the last atom in a segment so we break the segment here and append it to
+                    // our list.
+                    segments.push_back(current_segment);
+                    current_segment = Segment::default();
+                }
+                BoxType::StypBox => {
+                    let mut styp = FtypBox::read_box(&mut reader, s)?;
+                    styp.box_type = BoxType::StypBox;
+                    current_segment.styp = Some(styp);
+                }
+                b => {
+                    warn!(log, "Got a weird box type."; "box_type" => b.to_string());
+                    skip_box(&mut reader, s)?;
+                }
+            }
+
+            current = reader.seek(SeekFrom::Current(0))?;
+        }
+
+        Ok(segments)
+    }
+
     pub fn normalize_and_dump(mut self, seq: u32, file: &mut File) -> Result<()> {
         if let Some(tfdt) = self
             .moof
@@ -419,48 +495,95 @@ impl Segment {
     }
 }
 
+#[derive(Default)]
+pub struct InitSegment {
+    pub ftyp: Option<FtypBox>,
+    // FIXME: implement parsers for mvex and mdta boxes.
+    // For now we just save and dump the bytes since we dont modify them ever.
+    pub moov: Vec<u8>,
+    pub segments: VecDeque<Segment>,
+}
+
+impl InitSegment {
+    pub fn parse(mut reader: impl BufRead + Seek, size: u64, log: slog::Logger) -> Result<Self> {
+        let mut segment = Self::default();
+        let start = reader.seek(SeekFrom::Current(0))?;
+
+        let mut current = start;
+        let mut current_segment = Segment::default();
+
+        while current < size {
+            let header = BoxHeader::read(&mut reader)?;
+            let BoxHeader { name, size: s } = header;
+
+            match name {
+                BoxType::SidxBox => {
+                    current_segment.sidx = Some(SidxBox::read_box(&mut reader, s)?);
+                }
+                BoxType::MoofBox => {
+                    current_segment.moof = Some(MoofBox::read_box(&mut reader, s)?);
+                }
+                BoxType::MdatBox => {
+                    current_segment.mdat = Some(MdatBox::read_box(&mut reader, s)?);
+                    // segments packed in the init segments dont come with a styp box
+                    // so we clone the ftyp box of the init segment and change its type.
+                    if current_segment.styp.is_none() {
+                        current_segment.styp = segment.ftyp.clone();
+                    }
+                    // mdat is the last atom in a segment so we break the segment here and append it to
+                    // our list.
+                    segment.segments.push_back(current_segment);
+                    current_segment = Segment::default();
+                }
+                BoxType::FtypBox => {
+                    segment.ftyp = Some(FtypBox::read_box(&mut reader, s)?);
+                }
+                BoxType::MoovBox => {
+                    segment.moov = vec![0; (s - 8) as usize];
+                    reader.read_exact(segment.moov.as_mut_slice())?;
+                }
+                BoxType::StypBox => {
+                    current_segment.styp = Some(FtypBox::read_box(&mut reader, s)?);
+                }
+                b => {
+                    warn!(log, "Got a weird box type."; "box_type" => b.to_string());
+                    BoxHeader { name: b, size: s }.write(&mut segment.moov)?;
+                    let mut boks = vec![0; (s - 8) as usize];
+                    reader.read_exact(boks.as_mut_slice())?;
+                    segment.moov.append(&mut boks);
+                }
+            }
+
+            current = reader.seek(SeekFrom::Current(0))?;
+        }
+
+        Ok(segment)
+    }
+
+    pub fn normalize_and_dump(self, file: &mut File) -> Result<()> {
+        if let Some(ftyp) = self.ftyp {
+            ftyp.write_box(file)?;
+        }
+
+        BoxHeader {
+            name: BoxType::MoovBox,
+            size: self.moov.len() as u64 + 8,
+        }
+        .write(file)?;
+        file.write_all(&self.moov)?;
+
+        Ok(())
+    }
+}
+
 /// Function will patch a segment to appear as if it belongs to the current stream and is
 /// sequential.
 fn patch_segment<T: AsRef<Path>>(log: slog::Logger, file: T, mut seq: u32) -> Result<u32> {
     let f = File::open(&file)?;
     let size = f.metadata()?.len();
-    let mut reader = BufReader::new(f);
+    let reader = BufReader::new(f);
 
-    let start = reader.seek(SeekFrom::Current(0))?;
-
-    let mut segments = VecDeque::new();
-    let mut current = start;
-    let mut current_segment = Segment::default();
-
-    while current < size {
-        let header = BoxHeader::read(&mut reader)?;
-        let BoxHeader { name, size: s } = header;
-
-        match name {
-            BoxType::SidxBox => {
-                current_segment.sidx = Some(SidxBox::read_box(&mut reader, s)?);
-            }
-            BoxType::MoofBox => {
-                current_segment.moof = Some(MoofBox::read_box(&mut reader, s)?);
-            }
-            BoxType::MdatBox => {
-                current_segment.mdat = Some(MdatBox::read_box(&mut reader, s)?);
-                // mdat is the last atom in a segment so we break the segment here and append it to
-                // our list.
-                segments.push_back(current_segment);
-                current_segment = Segment::default();
-            }
-            BoxType::StypBox | BoxType::FtypBox => {
-                current_segment.styp = Some(FtypBox::read_box(&mut reader, s)?);
-            }
-            b => {
-                warn!(log, "Got a weird box type."; "box_type" => b.to_string());
-                skip_box(&mut reader, s)?;
-            }
-        }
-
-        current = reader.seek(SeekFrom::Current(0))?;
-    }
+    let mut segments = Segment::parse(reader, size, log)?;
 
     let mut out = File::create(&file)?;
 
@@ -468,6 +591,33 @@ fn patch_segment<T: AsRef<Path>>(log: slog::Logger, file: T, mut seq: u32) -> Re
         segment.normalize_and_dump(seq, &mut out)?;
         seq += 1;
     }
+
+    Ok(seq)
+}
+
+fn patch_init_segment<T: AsRef<Path>>(
+    log: slog::Logger,
+    init: T,
+    next_seg: T,
+    mut seq: u32,
+) -> Result<u32> {
+    let f = File::open(&init)?;
+    let size = f.metadata()?.len();
+    let reader = BufReader::new(f);
+    let mut init_segment = InitSegment::parse(reader, size, log.clone())?;
+
+    if init_segment.segments.is_empty() {
+        return Ok(seq);
+    }
+
+    let mut next_seg = File::create(&next_seg)?;
+    while let Some(segment) = init_segment.segments.pop_front() {
+        segment.normalize_and_dump(seq, &mut next_seg)?;
+        seq += 1;
+    }
+
+    let mut init = File::create(&init)?;
+    init_segment.normalize_and_dump(&mut init)?;
 
     Ok(seq)
 }

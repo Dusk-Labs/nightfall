@@ -60,12 +60,10 @@ impl Session {
         profile: &'static dyn TranscodingProfile,
         profile_ctx: ProfileContext,
     ) -> Self {
-        std::fs::create_dir_all(&profile_ctx.outdir).unwrap();
-
         Self {
             id,
             profile,
-            real_segment: profile_ctx.start_num,
+            real_segment: profile_ctx.output_ctx.start_num,
             profile_ctx,
             last_chunk: 0,
             _process: None,
@@ -82,16 +80,19 @@ impl Session {
         self.has_started = true;
         self.paused = false;
 
-        let _ = fs::create_dir_all(&self.profile_ctx.outdir);
-
         let args = self.profile.build(self.profile_ctx.clone()).unwrap();
 
-        let log_file = format!("{}/ffmpeg.log", &self.profile_ctx.outdir);
+        let _ = std::fs::create_dir_all(&self.profile_ctx.output_ctx.outdir);
+        let log_file = format!("{}/ffmpeg.log", &self.profile_ctx.output_ctx.outdir);
 
         let stderr: Stdio = File::create(log_file)?.into();
 
         let stdout: Stdio = if self.profile.stream_type() == StreamType::Subtitle {
-            File::create(format!("{}/stream.vtt", &self.profile_ctx.outdir))?.into()
+            File::create(format!(
+                "{}/stream.vtt",
+                &self.profile_ctx.output_ctx.outdir
+            ))?
+            .into()
         } else {
             Stdio::piped()
         };
@@ -123,7 +124,7 @@ impl Session {
     }
 
     pub fn start_num(&self) -> u32 {
-        self.profile_ctx.start_num
+        self.profile_ctx.output_ctx.start_num
     }
 
     pub async fn join(&mut self) {
@@ -134,7 +135,7 @@ impl Session {
     }
 
     pub fn stderr(&mut self) -> Option<String> {
-        let file = format!("{}/ffmpeg.log", &self.profile_ctx.outdir);
+        let file = format!("{}/ffmpeg.log", &self.profile_ctx.output_ctx.outdir);
 
         let mut buf = String::new();
         let _ = File::open(file).ok()?.read_to_string(&mut buf);
@@ -165,7 +166,7 @@ impl Session {
     }
 
     pub fn delete_tmp(&self) {
-        let _ = fs::remove_dir_all(&self.profile_ctx.outdir);
+        let _ = fs::remove_dir_all(&self.profile_ctx.output_ctx.outdir);
     }
 
     pub fn is_dead(&self) -> bool {
@@ -218,7 +219,9 @@ impl Session {
 
         match self.profile.stream_type() {
             StreamType::Audio { .. } => (frame / (CHUNK_SIZE * 24)).max(self.last_chunk),
-            StreamType::Video { .. } => frame / (CHUNK_SIZE * 24) + self.profile_ctx.start_num,
+            StreamType::Video { .. } => {
+                frame / (CHUNK_SIZE * 24) + self.profile_ctx.output_ctx.start_num
+            }
             _ => 0,
         }
     }
@@ -232,7 +235,7 @@ impl Session {
 
     // returns how many chunks per second
     pub fn speed(&self) -> f64 {
-        (self.raw_speed().floor().max(20.0) * 24.0) / (CHUNK_SIZE as f64 * 24.0)
+        self.raw_speed().floor().max(20.0) / CHUNK_SIZE as f64
     }
 
     pub fn eta_for(&self, chunk: u32) -> Duration {
@@ -247,7 +250,11 @@ impl Session {
     /// Method does some math magic to guess if a chunk has been fully written by ffmpeg yet
     /// only works when `ffmpeg` writes files to tmp then renames them.
     pub fn is_chunk_done(&self, chunk_num: u32) -> bool {
-        Path::new(&format!("{}/{}.m4s", &self.profile_ctx.outdir, chunk_num)).is_file()
+        Path::new(&format!(
+            "{}/{}.m4s",
+            &self.profile_ctx.output_ctx.outdir, chunk_num
+        ))
+        .is_file()
     }
 
     pub fn subtitle(&self, file: String) -> Option<String> {
@@ -255,7 +262,7 @@ impl Session {
             return None;
         }
 
-        let file = format!("{}/{}", &self.profile_ctx.outdir, file);
+        let file = format!("{}/{}", &self.profile_ctx.output_ctx.outdir, file);
         let path = Path::new(&file);
 
         // NOTE: This will not check if the ffmpeg process is dead, thus this will return immediately
@@ -276,11 +283,15 @@ impl Session {
     }
 
     pub fn chunk_to_path(&self, chunk_num: u32) -> String {
-        format!("{}/{}.m4s", self.profile_ctx.outdir, chunk_num)
+        format!("{}/{}.m4s", self.profile_ctx.output_ctx.outdir, chunk_num)
     }
 
     pub fn init_seg(&self) -> String {
-        format!("{}/{}_init.mp4", self.profile_ctx.outdir, self.start_num())
+        format!(
+            "{}/{}_init.mp4",
+            self.profile_ctx.output_ctx.outdir,
+            self.start_num()
+        )
     }
 
     pub fn has_started(&self) -> bool {
@@ -288,7 +299,7 @@ impl Session {
     }
 
     pub fn reset_to(&mut self, chunk: u32) {
-        self.profile_ctx.start_num = chunk;
+        self.profile_ctx.output_ctx.start_num = chunk;
         self._process = None;
         self.last_chunk = chunk;
         self.has_started = false;
@@ -301,7 +312,7 @@ impl fmt::Debug for Session {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Session")
             .field("id", &self.id)
-            .field("start_number", &self.profile_ctx.start_num)
+            .field("start_number", &self.profile_ctx.output_ctx.start_num)
             .field("last_chunk", &self.last_chunk)
             .finish()
     }

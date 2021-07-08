@@ -8,69 +8,69 @@ pub struct FFPWrapper {
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
-struct FFPStream {
+pub struct FFPStream {
     streams: Vec<Stream>,
     format: Format,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
-struct Stream {
-    index: i64,
-    codec_name: String,
-    codec_long_name: String,
-    profile: Option<String>,
-    codec_type: String,
-    codec_time_base: Option<String>,
-    width: Option<i64>,
-    height: Option<i64>,
-    coded_width: Option<i64>,
-    coded_height: Option<i64>,
-    display_aspect_ratio: Option<String>,
-    is_avc: Option<String>,
-    tags: Option<Tags>,
-    sample_rate: Option<String>,
-    channels: Option<i64>,
-    channel_layout: Option<String>,
-    bit_rate: Option<String>,
-    duration_ts: Option<i64>,
-    duration: Option<String>,
-    color_range: Option<String>,
-    color_space: Option<String>,
+pub struct Stream {
+    pub index: i64,
+    pub codec_name: String,
+    pub codec_long_name: String,
+    pub profile: Option<String>,
+    pub codec_type: String,
+    pub codec_time_base: Option<String>,
+    pub width: Option<i64>,
+    pub height: Option<i64>,
+    pub coded_width: Option<i64>,
+    pub coded_height: Option<i64>,
+    pub display_aspect_ratio: Option<String>,
+    pub is_avc: Option<String>,
+    pub tags: Option<Tags>,
+    pub sample_rate: Option<String>,
+    pub channels: Option<i64>,
+    pub channel_layout: Option<String>,
+    pub bit_rate: Option<String>,
+    pub duration_ts: Option<i64>,
+    pub duration: Option<String>,
+    pub color_range: Option<String>,
+    pub color_space: Option<String>,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
-struct Tags {
-    language: Option<String>,
-    title: Option<String>,
+pub struct Tags {
+    pub language: Option<String>,
+    pub title: Option<String>,
     #[serde(rename = "BPS-eng")]
-    bps_eng: Option<String>,
+    pub bps_eng: Option<String>,
     #[serde(rename = "DURATION-eng")]
-    duration_eng: Option<String>,
+    pub duration_eng: Option<String>,
     #[serde(rename = "NUMBER_OF_FRAMES-eng")]
-    number_of_frames_eng: Option<String>,
+    pub number_of_frames_eng: Option<String>,
     #[serde(rename = "NUMBER_OF_BYTES-eng")]
-    number_of_bytes_eng: Option<String>,
+    pub number_of_bytes_eng: Option<String>,
     #[serde(rename = "_STATISTICS_WRITING_APP-eng")]
-    statistics_writing_app_eng: Option<String>,
+    pub statistics_writing_app_eng: Option<String>,
     #[serde(rename = "_STATISTICS_WRITING_DATE_UTC-eng")]
-    statistics_writing_date_utc_eng: Option<String>,
+    pub statistics_writing_date_utc_eng: Option<String>,
     #[serde(rename = "_STATISTICS_TAGS-eng")]
-    statistics_tags_eng: Option<String>,
-    filename: Option<String>,
-    mimetype: Option<String>,
+    pub statistics_tags_eng: Option<String>,
+    pub filename: Option<String>,
+    pub mimetype: Option<String>,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
-struct Format {
-    filename: String,
-    nb_streams: i64,
-    nb_programs: i64,
-    format_name: String,
-    format_long_name: String,
-    start_time: String,
-    duration: String,
-    size: String,
-    bit_rate: String,
+pub struct Format {
+    pub filename: String,
+    pub nb_streams: i64,
+    pub nb_programs: i64,
+    pub format_name: String,
+    pub format_long_name: String,
+    pub start_time: String,
+    pub duration: String,
+    pub size: String,
+    pub bit_rate: String,
 }
 
 pub struct FFProbeCtx {

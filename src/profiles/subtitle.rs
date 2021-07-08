@@ -1,3 +1,5 @@
+use crate::error::NightfallError;
+
 use super::ProfileContext;
 use super::ProfileType;
 use super::StreamType;
@@ -22,7 +24,7 @@ impl TranscodingProfile for WebvttTranscodeProfile {
         let args = vec![
             "-y".into(),
             "-i".into(),
-            ctx.input_ctx.file,
+            ctx.file,
             "-map".into(),
             format!("0:{}", ctx.input_ctx.stream),
             "-f".into(),
@@ -33,12 +35,69 @@ impl TranscodingProfile for WebvttTranscodeProfile {
         Some(args)
     }
 
-    fn supports(&self, codec_in: &str, codec_out: &str) -> bool {
-        codec_out == "webvtt" && ["srt", "ass"].contains(&codec_in)
+    fn supports(&self, ctx: &ProfileContext) -> Result<(), NightfallError> {
+        if ["srt", "ass", "ssa"].contains(&ctx.input_ctx.codec.as_str())
+            && ctx.output_ctx.codec == "webvtt"
+        {
+            return Ok(());
+        }
+
+        Err(NightfallError::ProfileNotSupported(
+            "Codec {} not supported.".into(),
+        ))
     }
 
     fn tag(&self) -> &str {
         "webvtt"
+    }
+
+    fn is_stdio_stream(&self) -> bool {
+        true
+    }
+}
+
+pub struct AssExtractProfile;
+
+impl TranscodingProfile for AssExtractProfile {
+    fn profile_type(&self) -> ProfileType {
+        ProfileType::Transmux
+    }
+
+    fn stream_type(&self) -> StreamType {
+        StreamType::Subtitle
+    }
+
+    fn name(&self) -> &str {
+        "AssExtractProfile"
+    }
+
+    fn build(&self, ctx: ProfileContext) -> Option<Vec<String>> {
+        let args = vec![
+            "-y".into(),
+            "-i".into(),
+            ctx.file,
+            "-map".into(),
+            format!("0:{}", ctx.input_ctx.stream),
+            "-f".into(),
+            "ass".into(),
+            "-".into(),
+        ];
+
+        Some(args)
+    }
+
+    fn supports(&self, ctx: &ProfileContext) -> Result<(), NightfallError> {
+        if ctx.input_ctx.codec.as_str() == "ass" && ctx.output_ctx.codec.as_str() == "ass" {
+            return Ok(());
+        }
+
+        Err(NightfallError::ProfileNotSupported(
+                "Profile only supports extracting ass subtitles.".into()
+        ))
+    }
+
+    fn tag(&self) -> &str {
+        "ass"
     }
 
     fn is_stdio_stream(&self) -> bool {
