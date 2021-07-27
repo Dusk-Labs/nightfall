@@ -304,6 +304,7 @@ impl Session {
         self.last_chunk = chunk;
         self.has_started = false;
         self.paused = true;
+        self.real_segment = chunk;
         self.child_pid = None;
     }
 }
