@@ -3,6 +3,8 @@ pub mod subtitle;
 #[cfg(unix)]
 pub mod vaapi;
 pub mod video;
+#[cfg(windows)]
+pub mod amf;
 
 pub use audio::AacTranscodeProfile;
 pub use subtitle::WebvttTranscodeProfile;
@@ -12,6 +14,8 @@ pub use vaapi::VaapiTranscodeProfile;
 pub use video::H264TranscodeProfile;
 pub use video::H264TransmuxProfile;
 pub use video::RawVideoTranscodeProfile;
+#[cfg(windows)]
+pub use amf::AmfTranscodeProfile;
 
 use crate::NightfallError;
 use std::lazy::SyncOnceCell;
@@ -28,6 +32,8 @@ pub fn profiles_init(log: slog::Logger, _ffmpeg_bin: String) {
         box AssExtractProfile,
         #[cfg(unix)]
         box VaapiTranscodeProfile::default(),
+        #[cfg(windows)]
+        box AmfTranscodeProfile,
     ];
 
     let _ = PROFILES.set(
