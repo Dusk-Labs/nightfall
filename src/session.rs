@@ -52,6 +52,8 @@ pub struct Session {
     child_pid: Option<u32>,
     real_process: Option<Child>,
     pub real_segment: u32,
+    // has the first chunk since init has been requested been returned?
+    pub first_chunk_since_init: bool
 }
 
 impl Session {
@@ -72,6 +74,7 @@ impl Session {
             child_pid: None,
             real_process: None,
             hard_timeout: Instant::now() + Duration::from_secs(30 * 60),
+            first_chunk_since_init: true
         }
     }
 
@@ -89,7 +92,7 @@ impl Session {
 
         let stdout: Stdio = if self.profile.stream_type() == StreamType::Subtitle {
             File::create(format!(
-                "{}/stream.vtt",
+                "{}/stream",
                 &self.profile_ctx.output_ctx.outdir
             ))?
             .into()
@@ -106,7 +109,7 @@ impl Session {
         self.child_pid = process.id();
 
         if !self.profile.is_stdio_stream() {
-            if let Some(stdout) = process.stdout.take() {
+            if let Some(stdout) = dbg!(process.stdout.take()) {
                 let stdout_parser_thread =
                     StdoutParser::new(self.id.clone(), stdout, self.child_pid.clone().unwrap());
 

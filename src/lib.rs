@@ -190,6 +190,22 @@ impl StateManager {
             let _ = session.start().await;
         }
 
+        if !session.is_chunk_done(chunk) && session.first_chunk_since_init {
+            // NOTE: a shitty side-effect about the `should_hard_seek` statemement below is that this
+            // causes quality switching to take a fuckton of time and essentially doesnt work.
+            // Because of this we essentially ignore the previous statement if the client is requesting
+            // the first chunk after a init segment. If they are and the chunk isnt `0` then we hard
+            // seek, otherwise the client will just wait.
+            session.join().await;
+            session.reset_to(chunk);
+            let _ = session.start().await;
+            session.cont();
+            stats.hard_seeked_at = chunk;
+            session.first_chunk_since_init = false;
+
+            return Err(NightfallError::ChunkNotDone);
+        }
+
         if !session.is_chunk_done(chunk) {
             let eta = session.eta_for(chunk).as_millis() as f64;
             let eta_tol = (10_000.0 / session.raw_speed()).max(8_000.0);
@@ -219,25 +235,42 @@ impl StateManager {
             Err(NightfallError::ChunkNotDone)
         } else {
             let chunk_path = session.chunk_to_path(chunk);
+            let log = self.logger.clone();
+            let path = chunk_path.clone();
+            let real_segment = session.real_segment;
 
             // hint that we should probably unpause ffmpeg for a bit
             if chunk + 2 >= session.current_chunk() {
                 session.cont();
             }
 
-            session.reset_timeout(chunk);
+            // sometimes the first real segment in a stream can be blank with the video data being
+            // in the previous init segment. thus we patch it here.
+            if chunk == session.start_num() {
+                let init = session.init_seg();
 
-            let log = self.logger.clone();
-            let path = chunk_path.clone();
-
-            let real_segment = session.real_segment;
-            match tokio::task::spawn_blocking(move || patch_segment(log, path, real_segment))
+                match tokio::task::spawn_blocking(move || {
+                    patch_init_segment(log, init, path, real_segment)
+                })
                 .await
-                .unwrap()
-            {
-                Ok(seq) => session.real_segment = seq,
-                Err(e) => warn!(self.logger, "Failed to patch segment."; "error" => e.to_string()),
+                .unwrap() {
+                    Ok(seq) => session.real_segment = seq,
+                    Err(e) => {
+                        warn!(self.logger, "Failed to patch init segment."; "error" => e.to_string())
+                    }
+                }
+            } else {
+
+                match tokio::task::spawn_blocking(move || patch_segment(log, path, real_segment))
+                    .await
+                    .unwrap()
+                    {
+                        Ok(seq) => session.real_segment = seq,
+                        Err(e) => warn!(self.logger, "Failed to patch segment."; "error" => e.to_string()),
+                    }
             }
+
+            session.reset_timeout(chunk);
 
             Ok(chunk_path)
         }

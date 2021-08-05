@@ -114,6 +114,17 @@ impl TranscodingProfile for VaapiTranscodeProfile {
             "h264_vaapi".into(),
         ];
 
+        if let Some(height) = ctx.output_ctx.height {
+            let width = ctx.output_ctx.width.unwrap_or(-2); // defaults to scaling by 2
+            args.push("-vf".into());
+            args.push(format!("scale={}:{}", height, width));
+        }
+
+        if let Some(bitrate) = ctx.output_ctx.bitrate {
+            args.push("-b:v".into());
+            args.push(bitrate.to_string());
+        }
+
         args.append(&mut vec![
             "-start_at_zero".into(),
             "-vsync".into(),
