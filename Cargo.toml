@@ -1,6 +1,6 @@
 [package]
 name = "nightfall"
-version = "0.2.6"
+version = "0.2.7"
 authors = ["Valerian G. <valerian.garleanu@pm.me>"]
 edition = "2018"
 license = "GPL-2.0"
@@ -28,7 +28,7 @@ mp4 = { git = "https://github.com/vgarleanu/mp4-rust" }
 [target.'cfg(unix)'.dependencies]
 nix = "0.20.0"
 psutil = "3.2.0"
-rusty_vainfo = "0.1.1"
+rusty_vainfo = "^0"
 
 [target.'cfg(windows)'.dependencies]
 winapi = { version = "^0.3.9", features = ["winerror", "synchapi", "minwinbase"] }
