@@ -28,7 +28,7 @@ mp4 = { git = "https://github.com/vgarleanu/mp4-rust" }
 [target.'cfg(unix)'.dependencies]
 nix = "0.20.0"
 psutil = "3.2.0"
-rusty_vainfo = "^0"
+rusty_vainfo = "*"
 
 [target.'cfg(windows)'.dependencies]
 winapi = { version = "^0.3.9", features = ["winerror", "synchapi", "minwinbase"] }
