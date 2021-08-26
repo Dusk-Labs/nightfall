@@ -36,7 +36,7 @@ impl TranscodingProfile for WebvttTranscodeProfile {
     }
 
     fn supports(&self, ctx: &ProfileContext) -> Result<(), NightfallError> {
-        if ["srt", "ass", "ssa"].contains(&ctx.input_ctx.codec.as_str())
+        if ["srt", "ass", "ssa", "subrip"].contains(&ctx.input_ctx.codec.as_str())
             && ctx.output_ctx.codec == "webvtt"
         {
             return Ok(());
