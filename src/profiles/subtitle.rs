@@ -43,7 +43,7 @@ impl TranscodingProfile for WebvttTranscodeProfile {
         }
 
         Err(NightfallError::ProfileNotSupported(
-            "Codec {} not supported.".into(),
+            format!("Codec {} not supported.", ctx.input_ctx.codec.as_str())
         ))
     }
 
