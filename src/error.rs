@@ -21,6 +21,8 @@ pub enum NightfallError {
     MissingSegmentBox,
     #[error(display = "Profile not supported {}", 0)]
     ProfileNotSupported(String),
+    #[error(display = "Profile chain exhausted.")]
+    ProfileChainExhausted,
 }
 
 impl From<mp4::Error> for NightfallError {

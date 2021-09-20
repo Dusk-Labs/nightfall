@@ -90,10 +90,13 @@ impl StateManager {
     #[handler]
     async fn create(
         &mut self,
-        profile: &'static dyn TranscodingProfile,
+        profile_chain: Vec<&'static dyn TranscodingProfile>,
         profile_args: ProfileContext,
     ) -> Result<String> {
         let mut profile_args = profile_args;
+
+        let first_tag = profile_chain.first().expect("Empty profile chain.").tag();
+        let chain = profile_chain.iter().map(|x| x.tag()).collect::<Vec<_>>().join(" -> ");
 
         let session_id = uuid::Uuid::new_v4().to_hyphenated().to_string();
         let tag = if let Some(width) = profile_args.output_ctx.width {
@@ -104,25 +107,26 @@ impl StateManager {
                 .unwrap_or_default();
             let height = profile_args.output_ctx.height.unwrap_or(-2);
 
-            format!("{} ({}x{}{})", profile.tag(), width, height, bitrate)
+            format!("{} ({}x{}{})", &first_tag, width, height, bitrate)
         } else {
             let bitrate = profile_args
                 .output_ctx
                 .bitrate
                 .map(|x| format!("@{}", x))
                 .unwrap_or_default();
-            format!("{}{}", profile.tag(), bitrate)
+            format!("{}{}", &first_tag, bitrate)
         };
 
         info!(
             self.logger,
             "New session {} map {} -> {}", &session_id, profile_args.input_ctx.stream, tag
         );
+        info!(self.logger, "Session {} chain {}", &session_id, chain);
 
         profile_args.output_ctx.outdir = format!("{}/{}", &self.outdir, session_id);
         profile_args.ffmpeg_bin = self.ffmpeg.clone();
 
-        let new_session = Session::new(session_id.clone(), profile, profile_args);
+        let new_session = Session::new(session_id.clone(), profile_chain, profile_args);
 
         self.sessions.insert(session_id.clone(), new_session);
 
@@ -135,6 +139,19 @@ impl StateManager {
             .sessions
             .get_mut(&id)
             .ok_or(NightfallError::SessionDoesntExist)?;
+
+        // If ffmpeg abrupty closes we want to move down the profile chain and try other profiles
+        // until we get something that works or we exhaust all our profiles.
+        if let Some(status) = session.exit_status.as_ref() {
+            if !status.success() {
+                if let Some(x) = session.next_profile() {
+                    info!(self.logger, "Session {} trying profile {}", &id, x);
+                    session.reset_to(chunk);
+                } else {
+                    return Err(NightfallError::ProfileChainExhausted);
+                }
+            }
+        }
 
         if !session.is_chunk_done(chunk) {
             if session.start_num() != chunk {

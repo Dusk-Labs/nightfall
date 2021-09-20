@@ -51,6 +51,15 @@ pub fn profiles_init(log: slog::Logger, _ffmpeg_bin: String) {
     );
 }
 
+pub fn get_active_profiles() -> Vec<&'static dyn TranscodingProfile> {
+    PROFILES
+        .get()
+        .expect("nightfall::PROFILES not initialized.")
+        .iter()
+        .map(AsRef::as_ref)
+        .collect()
+}
+
 pub fn get_profile_for(
     log: &slog::Logger,
     stream_type: StreamType,

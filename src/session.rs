@@ -10,6 +10,7 @@ use std::io;
 use std::io::Read;
 use std::path::Path;
 use std::process::Stdio;
+use std::process::ExitStatus;
 use std::sync::Arc;
 use std::sync::RwLock;
 use std::time::Duration;
@@ -43,9 +44,11 @@ pub struct Session {
     pub id: String,
     pub paused: bool,
 
+    pub profile_chain: Vec<&'static dyn TranscodingProfile>,
     pub profile: &'static dyn TranscodingProfile,
     profile_ctx: ProfileContext,
     _process: Option<JoinHandle<()>>,
+    pub exit_status: Option<ExitStatus>,
     has_started: bool,
     last_chunk: u32,
     hard_timeout: Instant,
@@ -59,12 +62,14 @@ pub struct Session {
 impl Session {
     pub fn new(
         id: String,
-        profile: &'static dyn TranscodingProfile,
+        mut profile_chain: Vec<&'static dyn TranscodingProfile>,
         profile_ctx: ProfileContext,
     ) -> Self {
+        let profile = profile_chain.pop().expect("Profile chain is empty.");
         Self {
             id,
             profile,
+            profile_chain,
             real_segment: profile_ctx.output_ctx.start_num,
             profile_ctx,
             last_chunk: 0,
@@ -74,7 +79,8 @@ impl Session {
             child_pid: None,
             real_process: None,
             hard_timeout: Instant::now() + Duration::from_secs(30 * 60),
-            first_chunk_since_init: true
+            first_chunk_since_init: true,
+            exit_status: None
         }
     }
 
@@ -86,7 +92,7 @@ impl Session {
         let args = self.profile.build(self.profile_ctx.clone()).unwrap();
 
         let _ = std::fs::create_dir_all(&self.profile_ctx.output_ctx.outdir);
-        let log_file = format!("{}/ffmpeg.log", &self.profile_ctx.output_ctx.outdir);
+        let log_file = format!("{}/ffmpeg_{}.log", &self.profile_ctx.output_ctx.outdir, self.profile.tag());
 
         let stderr: Stdio = File::create(log_file)?.into();
 
@@ -130,15 +136,20 @@ impl Session {
         self.profile_ctx.output_ctx.start_num
     }
 
+    pub fn next_profile(&mut self) -> Option<&str> {
+        self.profile = self.profile_chain.pop()?;
+        Some(self.profile.tag())
+    }
+
     pub async fn join(&mut self) {
         if let Some(ref mut x) = self.real_process {
             let _ = x.kill().await;
-            let _ = x.wait().await;
+            self.exit_status = x.wait().await.ok();
         }
     }
 
     pub fn stderr(&mut self) -> Option<String> {
-        let file = format!("{}/ffmpeg.log", &self.profile_ctx.output_ctx.outdir);
+        let file = format!("{}/ffmpeg_{}.log", &self.profile_ctx.output_ctx.outdir, self.profile.tag());
 
         let mut buf = String::new();
         let _ = File::open(file).ok()?.read_to_string(&mut buf);
@@ -152,9 +163,11 @@ impl Session {
 
     pub fn try_wait(&mut self) -> bool {
         if let Some(ref mut x) = self.real_process {
-            if let Ok(Some(_)) = x.try_wait() {
+            if let Ok(Some(status)) = x.try_wait() {
+                self.exit_status = Some(status);
                 return true;
             }
+            self.exit_status = None;
         }
 
         false
