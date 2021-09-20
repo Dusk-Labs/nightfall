@@ -17,19 +17,15 @@ pub mod profiles;
 mod session;
 /// Contains utils that make my life easier.
 pub mod utils;
+/// Contains utils that patch segments to make them appear continuous.
+pub mod patch;
 
 use crate::error::*;
 use crate::profiles::*;
 use crate::session::Session;
+use crate::patch::segment::patch_segment;
 
 use std::collections::HashMap;
-use std::collections::VecDeque;
-use std::fs::File;
-use std::io::prelude::*;
-use std::io::BufReader;
-use std::io::Seek;
-use std::io::SeekFrom;
-use std::path::Path;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -39,8 +35,7 @@ use xtra_proc::handler;
 
 use slog::info;
 use slog::warn;
-
-use mp4::mp4box::*;
+use slog::debug;
 
 pub use tokio::process::ChildStdout;
 
@@ -145,8 +140,8 @@ impl StateManager {
         if let Some(status) = session.exit_status.as_ref() {
             if !status.success() {
                 if let Some(x) = session.next_profile() {
-                    info!(self.logger, "Session {} trying profile {}", &id, x);
-                    session.reset_to(chunk);
+                    info!(self.logger, "Session {}<{}>trying profile {}", &id, chunk, x);
+                    session.reset_to(session.start_num());
                 } else {
                     return Err(NightfallError::ProfileChainExhausted);
                 }
@@ -172,23 +167,6 @@ impl StateManager {
         }
 
         if session.is_chunk_done(chunk) {
-            let log = self.logger.clone();
-            let init = session.init_seg();
-            let next = session.chunk_to_path(session.start_num());
-            let real_segment = session.real_segment;
-
-            match tokio::task::spawn_blocking(move || {
-                patch_init_segment(log, init, next, real_segment)
-            })
-            .await
-            .unwrap()
-            {
-                Ok(seq) => session.real_segment = seq,
-                Err(e) => {
-                    warn!(self.logger, "Failed to patch init segment."; "error" => e.to_string())
-                }
-            }
-
             return Ok(session.init_seg());
         }
 
@@ -201,26 +179,10 @@ impl StateManager {
             .sessions
             .get_mut(&id)
             .ok_or(NightfallError::SessionDoesntExist)?;
-        let stats = self.stream_stats.entry(id).or_default();
+        let stats = self.stream_stats.entry(id.clone()).or_default();
 
         if !session.has_started() {
             let _ = session.start().await;
-        }
-
-        if !session.is_chunk_done(chunk) && session.first_chunk_since_init {
-            // NOTE: a shitty side-effect about the `should_hard_seek` statemement below is that this
-            // causes quality switching to take a fuckton of time and essentially doesnt work.
-            // Because of this we essentially ignore the previous statement if the client is requesting
-            // the first chunk after a init segment. If they are and the chunk isnt `0` then we hard
-            // seek, otherwise the client will just wait.
-            session.join().await;
-            session.reset_to(chunk);
-            let _ = session.start().await;
-            session.cont();
-            stats.hard_seeked_at = chunk;
-            session.first_chunk_since_init = false;
-
-            return Err(NightfallError::ChunkNotDone);
         }
 
         if !session.is_chunk_done(chunk) {
@@ -247,6 +209,8 @@ impl StateManager {
 
                 stats.last_hard_seek = Instant::now();
                 stats.hard_seeked_at = chunk;
+
+                debug!(self.logger, "Resetting {} to chunk {} because user seeked.", &id, chunk);
             }
 
             Err(NightfallError::ChunkNotDone)
@@ -261,30 +225,10 @@ impl StateManager {
                 session.cont();
             }
 
-            // sometimes the first real segment in a stream can be blank with the video data being
-            // in the previous init segment. thus we patch it here.
-            if chunk == session.start_num() {
-                let init = session.init_seg();
-
-                match tokio::task::spawn_blocking(move || {
-                    patch_init_segment(log, init, path, real_segment)
-                })
-                .await
-                .unwrap() {
-                    Ok(seq) => session.real_segment = seq,
-                    Err(e) => {
-                        warn!(self.logger, "Failed to patch init segment."; "error" => e.to_string())
-                    }
-                }
-            } else {
-
-                match tokio::task::spawn_blocking(move || patch_segment(log, path, real_segment))
-                    .await
-                    .unwrap()
-                    {
-                        Ok(seq) => session.real_segment = seq,
-                        Err(e) => warn!(self.logger, "Failed to patch segment."; "error" => e.to_string()),
-                    }
+            match patch_segment(log, path, real_segment).await
+            {
+                Ok(seq) => session.real_segment = seq,
+                Err(e) => warn!(self.logger, "Failed to patch segment."; "error" => e.to_string()),
             }
 
             session.reset_timeout(chunk);
@@ -443,244 +387,5 @@ impl StateManager {
             .ok_or(NightfallError::SessionDoesntExist)?;
 
         session.start().await.map_err(|_| NightfallError::Aborted)
-    }
-}
-
-#[derive(Default, Debug)]
-pub struct Segment {
-    pub styp: Option<FtypBox>,
-    pub sidx: Option<SidxBox>,
-    pub moof: Option<MoofBox>,
-    pub mdat: Option<MdatBox>,
-}
-
-impl Segment {
-    pub fn debug(&self) {
-        println!("styp: {:?}", self.styp);
-        println!("sidx: {:?}", self.sidx);
-        println!("moof: {:?}", self.moof);
-        println!(
-            "mdat: {:?}",
-            self.mdat.as_ref().map(|x| x.data.len()).unwrap_or(0)
-        );
-    }
-
-    pub fn parse(
-        mut reader: impl BufRead + Seek,
-        size: u64,
-        log: slog::Logger,
-    ) -> Result<VecDeque<Self>> {
-        let mut segments = VecDeque::new();
-        let start = reader.seek(SeekFrom::Current(0))?;
-
-        let mut current = start;
-        let mut current_segment = Self::default();
-
-        while current < size {
-            let header = BoxHeader::read(&mut reader)?;
-            let BoxHeader { name, size: s } = header;
-
-            match name {
-                BoxType::SidxBox => {
-                    current_segment.sidx = Some(SidxBox::read_box(&mut reader, s)?);
-                }
-                BoxType::MoofBox => {
-                    current_segment.moof = Some(MoofBox::read_box(&mut reader, s)?);
-                }
-                BoxType::MdatBox => {
-                    current_segment.mdat = Some(MdatBox::read_box(&mut reader, s)?);
-                    // mdat is the last atom in a segment so we break the segment here and append it to
-                    // our list.
-                    segments.push_back(current_segment);
-                    current_segment = Segment::default();
-                }
-                BoxType::StypBox => {
-                    let mut styp = FtypBox::read_box(&mut reader, s)?;
-                    styp.box_type = BoxType::StypBox;
-                    current_segment.styp = Some(styp);
-                }
-                b => {
-                    warn!(log, "Got a weird box type."; "box_type" => b.to_string());
-                    skip_box(&mut reader, s)?;
-                }
-            }
-
-            current = reader.seek(SeekFrom::Current(0))?;
-        }
-
-        Ok(segments)
-    }
-
-    pub fn normalize_and_dump(mut self, seq: u32, file: &mut File) -> Result<()> {
-        if let Some(tfdt) = self
-            .moof
-            .as_mut()
-            .map(|x| x.trafs[0].tfdt.as_mut())
-            .ok_or(NightfallError::MissingSegmentBox)?
-        {
-            if let Some(sidx) = self.sidx.as_ref() {
-                tfdt.base_media_decode_time = sidx.earliest_presentation_time;
-            }
-        }
-
-        if let Some(moof) = self.moof.as_mut() {
-            moof.mfhd.sequence_number = seq;
-        }
-
-        if let Some(mut styp) = self.styp {
-            styp.box_type = BoxType::StypBox;
-            styp.write_box(file)?;
-        }
-        if let Some(sidx) = self.sidx {
-            sidx.write_box(file)?;
-        }
-        if let Some(moof) = self.moof {
-            moof.write_box(file)?;
-        }
-        if let Some(mdat) = self.mdat {
-            mdat.write_box(file)?;
-        }
-
-        Ok(())
-    }
-}
-
-#[derive(Default)]
-pub struct InitSegment {
-    pub ftyp: Option<FtypBox>,
-    // FIXME: implement parsers for mvex and mdta boxes.
-    // For now we just save and dump the bytes since we dont modify them ever.
-    pub moov: Vec<u8>,
-    pub segments: VecDeque<Segment>,
-}
-
-impl InitSegment {
-    pub fn parse(mut reader: impl BufRead + Seek, size: u64, log: slog::Logger) -> Result<Self> {
-        let mut segment = Self::default();
-        let start = reader.seek(SeekFrom::Current(0))?;
-
-        let mut current = start;
-        let mut current_segment = Segment::default();
-
-        while current < size {
-            let header = BoxHeader::read(&mut reader)?;
-            let BoxHeader { name, size: s } = header;
-
-            match name {
-                BoxType::SidxBox => {
-                    current_segment.sidx = Some(SidxBox::read_box(&mut reader, s)?);
-                }
-                BoxType::MoofBox => {
-                    current_segment.moof = Some(MoofBox::read_box(&mut reader, s)?);
-                }
-                BoxType::MdatBox => {
-                    current_segment.mdat = Some(MdatBox::read_box(&mut reader, s)?);
-                    // segments packed in the init segments dont come with a styp box
-                    // so we clone the ftyp box of the init segment and change its type.
-                    if current_segment.styp.is_none() {
-                        current_segment.styp = segment.ftyp.clone();
-                    }
-                    // mdat is the last atom in a segment so we break the segment here and append it to
-                    // our list.
-                    segment.segments.push_back(current_segment);
-                    current_segment = Segment::default();
-                }
-                BoxType::FtypBox => {
-                    segment.ftyp = Some(FtypBox::read_box(&mut reader, s)?);
-                }
-                BoxType::MoovBox => {
-                    segment.moov = vec![0; (s - 8) as usize];
-                    reader.read_exact(segment.moov.as_mut_slice())?;
-                }
-                BoxType::StypBox => {
-                    current_segment.styp = Some(FtypBox::read_box(&mut reader, s)?);
-                }
-                b => {
-                    warn!(log, "Got a weird box type."; "box_type" => b.to_string());
-                    BoxHeader { name: b, size: s }.write(&mut segment.moov)?;
-                    let mut boks = vec![0; (s - 8) as usize];
-                    reader.read_exact(boks.as_mut_slice())?;
-                    segment.moov.append(&mut boks);
-                }
-            }
-
-            current = reader.seek(SeekFrom::Current(0))?;
-        }
-
-        Ok(segment)
-    }
-
-    pub fn normalize_and_dump(self, file: &mut File) -> Result<()> {
-        if let Some(ftyp) = self.ftyp {
-            ftyp.write_box(file)?;
-        }
-
-        BoxHeader {
-            name: BoxType::MoovBox,
-            size: self.moov.len() as u64 + 8,
-        }
-        .write(file)?;
-        file.write_all(&self.moov)?;
-
-        Ok(())
-    }
-}
-
-/// Function will patch a segment to appear as if it belongs to the current stream and is
-/// sequential.
-fn patch_segment<T: AsRef<Path>>(log: slog::Logger, file: T, mut seq: u32) -> Result<u32> {
-    let f = File::open(&file)?;
-    let size = f.metadata()?.len();
-    let reader = BufReader::new(f);
-
-    let mut segments = Segment::parse(reader, size, log)?;
-
-    let mut out = File::create(&file)?;
-
-    while let Some(segment) = segments.pop_front() {
-        segment.normalize_and_dump(seq, &mut out)?;
-        seq += 1;
-    }
-
-    Ok(seq)
-}
-
-fn patch_init_segment<T: AsRef<Path>>(
-    log: slog::Logger,
-    init: T,
-    next_seg: T,
-    mut seq: u32,
-) -> Result<u32> {
-    let f = File::open(&init)?;
-    let size = f.metadata()?.len();
-    let reader = BufReader::new(f);
-    let mut init_segment = InitSegment::parse(reader, size, log.clone())?;
-
-    if init_segment.segments.is_empty() {
-        return Ok(seq);
-    }
-
-    let mut next_seg = File::create(&next_seg)?;
-    while let Some(segment) = init_segment.segments.pop_front() {
-        segment.normalize_and_dump(seq, &mut next_seg)?;
-        seq += 1;
-    }
-
-    let mut init = File::create(&init)?;
-    init_segment.normalize_and_dump(&mut init)?;
-
-    Ok(seq)
-}
-
-trait WriteBoxToFile {
-    fn write_box(&self, writer: File) -> Result<u64>;
-}
-
-impl<T> WriteBoxToFile for T
-where
-    T: WriteBox<File>,
-{
-    fn write_box<'a>(&self, writer: File) -> Result<u64> {
-        Ok(<T as WriteBox<File>>::write_box(&self, writer)?)
     }
 }

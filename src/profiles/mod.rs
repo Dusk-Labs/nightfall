@@ -31,8 +31,8 @@ pub fn profiles_init(log: slog::Logger, _ffmpeg_bin: String) {
         box RawVideoTranscodeProfile,
         box WebvttTranscodeProfile,
         box AssExtractProfile,
-        #[cfg(unix)]
-        box VaapiTranscodeProfile::default(),
+        // #[cfg(unix)]
+        // box VaapiTranscodeProfile::default(),
         #[cfg(windows)]
         box AmfTranscodeProfile,
     ];

@@ -23,6 +23,9 @@ pub enum NightfallError {
     ProfileNotSupported(String),
     #[error(display = "Profile chain exhausted.")]
     ProfileChainExhausted,
+    #[error(display = "Parsed a partial segment.")]
+    #[serde(skip_serializing)]
+    PartialSegment(crate::patch::segment::Segment),
 }
 
 impl From<mp4::Error> for NightfallError {
