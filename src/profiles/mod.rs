@@ -19,6 +19,7 @@ pub use amf::AmfTranscodeProfile;
 
 use crate::NightfallError;
 use std::lazy::SyncOnceCell;
+use std::fmt::Debug;
 
 static PROFILES: SyncOnceCell<Vec<Box<dyn TranscodingProfile>>> = SyncOnceCell::new();
 
@@ -73,7 +74,7 @@ pub fn get_profile_for(
     profiles
 }
 
-pub trait TranscodingProfile: Send + Sync + 'static {
+pub trait TranscodingProfile: Debug + Send + Sync + 'static {
     /// Function must return what kind of profile it is.
     fn profile_type(&self) -> ProfileType;
 

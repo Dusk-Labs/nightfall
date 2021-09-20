@@ -12,6 +12,7 @@ use crate::NightfallError;
 /// profiles `Main`, `High` and `ConstrainedBaseline`. This profile will only transcode h264 input
 /// streams.
 #[cfg(unix)]
+#[derive(Debug)]
 pub struct VaapiTranscodeProfile {
     profiles: Vec<rusty_vainfo::Profile>,
     vendor: String,

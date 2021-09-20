@@ -6,6 +6,7 @@ use super::TranscodingProfile;
 use crate::error::NightfallError;
 use crate::session::CHUNK_SIZE;
 
+#[derive(Debug)]
 pub struct AacTranscodeProfile;
 
 impl TranscodingProfile for AacTranscodeProfile {

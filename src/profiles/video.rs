@@ -6,6 +6,7 @@ use super::TranscodingProfile;
 use crate::session::CHUNK_SIZE;
 use crate::NightfallError;
 
+#[derive(Debug)]
 pub struct H264TransmuxProfile;
 
 impl TranscodingProfile for H264TransmuxProfile {
@@ -115,6 +116,7 @@ impl TranscodingProfile for H264TransmuxProfile {
     }
 }
 
+#[derive(Debug)]
 pub struct H264TranscodeProfile;
 
 impl TranscodingProfile for H264TranscodeProfile {
@@ -235,6 +237,7 @@ impl TranscodingProfile for H264TranscodeProfile {
     }
 }
 
+#[derive(Debug)]
 pub struct RawVideoTranscodeProfile;
 
 impl TranscodingProfile for RawVideoTranscodeProfile {

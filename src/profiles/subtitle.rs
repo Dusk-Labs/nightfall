@@ -5,6 +5,7 @@ use super::ProfileType;
 use super::StreamType;
 use super::TranscodingProfile;
 
+#[derive(Debug)]
 pub struct WebvttTranscodeProfile;
 
 impl TranscodingProfile for WebvttTranscodeProfile {
@@ -56,6 +57,7 @@ impl TranscodingProfile for WebvttTranscodeProfile {
     }
 }
 
+#[derive(Debug)]
 pub struct AssExtractProfile;
 
 impl TranscodingProfile for AssExtractProfile {

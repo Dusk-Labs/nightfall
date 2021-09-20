@@ -6,6 +6,7 @@ use super::TranscodingProfile;
 use crate::session::CHUNK_SIZE;
 use crate::NightfallError;
 
+#[derive(Debug)]
 pub struct AmfTranscodeProfile;
 
 impl TranscodingProfile for AmfTranscodeProfile {

@@ -23,7 +23,6 @@ xtra_proc = "0.1.0"
 tokio = { version = "1.5.0", features = ["process", "io-util", "io-std", "macros", "time", "rt"] }
 tokio-stream = { version = "0.1.5", features = ["io-util"] }
 mp4 = { git = "https://github.com/vgarleanu/mp4-rust" }
-#mp4 = { path = "../mp4-rust" }
 
 [target.'cfg(unix)'.dependencies]
 nix = "0.20.0"
