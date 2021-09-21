@@ -8,6 +8,12 @@ description = "Nightfall is a library allowing on-demand video transcoding and s
 repository = "https://github.com/vgarleanu/nightfall"
 documentation = "https://docs.rs/nightfall"
 
+[features]
+vaapi = ["rusty_vainfo"]
+cuda = []
+
+default = ["cuda"]
+
 [dependencies]
 uuid = { version = "0.8.1", features = ["v4"] }
 lazy_static = "1.4.0"
@@ -27,7 +33,7 @@ mp4 = { git = "https://github.com/vgarleanu/mp4-rust" }
 [target.'cfg(unix)'.dependencies]
 nix = "0.20.0"
 psutil = "3.2.0"
-rusty_vainfo = "*"
+rusty_vainfo = { version = "*", optional = true }
 
 [target.'cfg(windows)'.dependencies]
 winapi = { version = "^0.3.9", features = ["winerror", "synchapi", "minwinbase"] }

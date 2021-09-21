@@ -1,8 +1,8 @@
 pub mod audio;
 pub mod subtitle;
-#[cfg(unix)]
+#[cfg(all(unix, vaapi))]
 pub mod vaapi;
-#[cfg(unix)]
+#[cfg(all(unix, cuda))]
 pub mod cuda;
 pub mod video;
 #[cfg(windows)]
@@ -11,9 +11,9 @@ pub mod amf;
 pub use audio::AacTranscodeProfile;
 pub use subtitle::WebvttTranscodeProfile;
 pub use subtitle::AssExtractProfile;
-#[cfg(unix)]
+#[cfg(all(unix, cuda))]
 pub use cuda::CudaTranscodeProfile;
-#[cfg(unix)]
+#[cfg(all(unix, vaapi))]
 pub use vaapi::VaapiTranscodeProfile;
 pub use video::H264TranscodeProfile;
 pub use video::H264TransmuxProfile;
@@ -35,10 +35,10 @@ pub fn profiles_init(log: slog::Logger, _ffmpeg_bin: String) {
         box RawVideoTranscodeProfile,
         box WebvttTranscodeProfile,
         box AssExtractProfile,
-        #[cfg(unix)]
+        #[cfg(all(unix, cuda))]
         box CudaTranscodeProfile,
-        // #[cfg(unix)]
-        // box VaapiTranscodeProfile::default(),
+        #[cfg(all(unix, vaapi))]
+        box VaapiTranscodeProfile::default(),
         #[cfg(windows)]
         box AmfTranscodeProfile,
     ];
