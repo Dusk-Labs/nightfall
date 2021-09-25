@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
-use std::io::*;
 use std::fs::File;
+use std::io::*;
 
 use super::segment::Segment;
 use crate::Result;
@@ -18,7 +18,11 @@ pub struct InitSegment {
 }
 
 impl InitSegment {
-    pub fn from_reader(mut reader: impl BufRead + Seek, size: u64, log: slog::Logger) -> Result<Self> {
+    pub fn from_reader(
+        mut reader: impl BufRead + Seek,
+        size: u64,
+        log: slog::Logger,
+    ) -> Result<Self> {
         let mut segment = Self::default();
         let start = reader.seek(SeekFrom::Current(0))?;
 
@@ -31,13 +35,13 @@ impl InitSegment {
 
             match name {
                 BoxType::SidxBox => {
-                    current_segment.sidx = SidxBox::read_box(&mut reader, s)?;
+                    current_segment.sidx = Some(SidxBox::read_box(&mut reader, s)?);
                 }
                 BoxType::MoofBox => {
-                    current_segment.moof = MoofBox::read_box(&mut reader, s)?;
+                    current_segment.moof = Some(MoofBox::read_box(&mut reader, s)?);
                 }
                 BoxType::MdatBox => {
-                    current_segment.mdat = MdatBox::read_box(&mut reader, s)?;
+                    current_segment.mdat = Some(MdatBox::read_box(&mut reader, s)?);
                     // segments packed in the init segments dont come with a styp box
                     // so we clone the ftyp box of the init segment and change its type.
                     if current_segment.styp.is_none() {

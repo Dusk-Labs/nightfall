@@ -99,7 +99,9 @@ impl TranscodingProfile for H264TransmuxProfile {
     /// the container doesnt support it, so we will be constricting it down.
     fn supports(&self, ctx: &ProfileContext) -> Result<(), NightfallError> {
         if ctx.input_ctx.bframes.unwrap_or(0) != 0 {
-            return Err(NightfallError::ProfileNotSupported("Transmuxing streams containing b-frames is currently not supported.".into()));
+            return Err(NightfallError::ProfileNotSupported(
+                "Transmuxing streams containing b-frames is currently not supported.".into(),
+            ));
         }
 
         if ctx.input_ctx.codec == ctx.output_ctx.codec && ctx.input_ctx.codec == "h264" {
@@ -156,7 +158,7 @@ impl TranscodingProfile for H264TranscodeProfile {
             // modify DTS to be correct otherwise when seeking the player breaks on chrome. Now the
             // issue is that when we have B-frames PTS != DTS so we must calculate it properly.
             "-x264-params".into(),
-            "bframes=0".into()
+            "bframes=0".into(),
         ];
 
         if let Some(height) = ctx.output_ctx.height {

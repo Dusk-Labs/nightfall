@@ -19,11 +19,11 @@ pub struct Segment {
     /// in our case we just clone it from the parent init segment.
     pub styp: Option<FtypBox>,
     /// segment index box contains the index of the segment.
-    pub sidx: SidxBox,
+    pub sidx: Option<SidxBox>,
     /// Moof box contains metadata about the segment like the PTS and DTS.
-    pub moof: MoofBox,
+    pub moof: Option<MoofBox>,
     /// Contains audio-visual data.
-    pub mdat: MdatBox,
+    pub mdat: Option<MdatBox>,
 }
 
 impl Segment {
@@ -33,7 +33,7 @@ impl Segment {
         println!("moof: {:?}", self.moof);
         println!(
             "mdat: {:?}",
-            self.mdat.data.len()
+            self.mdat.as_ref().map(|x| x.data.len()).unwrap_or(0)
         );
     }
 
@@ -53,13 +53,13 @@ impl Segment {
 
             match name {
                 BoxType::SidxBox => {
-                    segment.sidx = SidxBox::read_box(&mut reader, s)?;
+                    segment.sidx = Some(SidxBox::read_box(&mut reader, s)?);
                 }
                 BoxType::MoofBox => {
-                    segment.moof = MoofBox::read_box(&mut reader, s)?;
+                    segment.moof = Some(MoofBox::read_box(&mut reader, s)?);
                 }
                 BoxType::MdatBox => {
-                    segment.mdat = MdatBox::read_box(&mut reader, s)?;
+                    segment.mdat = Some(MdatBox::read_box(&mut reader, s)?);
 
                     // Since mdat would be the last box in the segment, we just return the segment
                     // here as well as the leftover bytes.
@@ -80,18 +80,40 @@ impl Segment {
             current = reader.seek(SeekFrom::Current(0))?;
         }
 
-        // NOTE: In some cases, we could get here without a complete segment existing. 
+        // NOTE: In some cases, we could get here without a complete segment existing.
         Ok((segment, size))
     }
 
+    /// Method will create a styp box for this segment if it doesnt exist
+    pub fn gen_styp(mut self) -> Self {
+        if self.styp.is_none() {
+            let mut styp = FtypBox::default();
+            styp.box_type = BoxType::StypBox;
+
+            self.styp = Some(styp);
+        }
+
+        self
+    }
+
     pub fn set_segno(mut self, seq: u32) -> Self {
-        self.moof.mfhd.sequence_number = seq;
+        if let Some(moof) = self.moof.as_mut() {
+            moof.mfhd.sequence_number = seq;
+        }
         self
     }
 
     pub fn normalize_dts(mut self) -> Self {
-        if let Some(tfdt) = self.moof.trafs[0].tfdt.as_mut() {
-            tfdt.base_media_decode_time = self.sidx.earliest_presentation_time;
+        // NOTE: Sometimes the first segment after init.mp4 can be blank, in cases like that we
+        // just ignore that moof is empty.
+        if let Some(tfdt) = self
+            .moof
+            .as_mut()
+            .and_then(|x| x.trafs.get_mut(0).and_then(|x| x.tfdt.as_mut()))
+        {
+            if let Some(sidx) = self.sidx.as_ref() {
+                tfdt.base_media_decode_time = sidx.earliest_presentation_time;
+            }
         }
 
         self
@@ -102,9 +124,17 @@ impl Segment {
             styp.write_box(file)?;
         }
 
-        self.sidx.write_box(file)?;
-        self.moof.write_box(file)?;
-        self.mdat.write_box(file)?;
+        if let Some(sidx) = self.sidx {
+            sidx.write_box(file)?;
+        }
+
+        if let Some(moof) = self.moof {
+            moof.write_box(file)?;
+        }
+
+        if let Some(mdat) = self.mdat {
+            mdat.write_box(file)?;
+        }
 
         Ok(())
     }
@@ -119,7 +149,11 @@ impl Segment {
 ///
 /// # Returns
 /// This function will return the index of the current segment.
-pub async fn patch_segment(log: slog::Logger, file: impl AsRef<Path> + Send + 'static, mut seq: u32) -> Result<u32> {
+pub async fn patch_segment(
+    log: slog::Logger,
+    file: impl AsRef<Path> + Send + 'static,
+    mut seq: u32,
+) -> Result<u32> {
     spawn_blocking(move || {
         let f = File::open(&file)?;
         let size = f.metadata()?.len();
@@ -139,6 +173,7 @@ pub async fn patch_segment(log: slog::Logger, file: impl AsRef<Path> + Send + 's
             // Here we normalize the DTS to be equal to the EPT/PTS and we also set the corrent
             // segment number.
             segment
+                .gen_styp()
                 .normalize_dts()
                 .set_segno(seq)
                 .write(&mut f)?;
@@ -147,5 +182,7 @@ pub async fn patch_segment(log: slog::Logger, file: impl AsRef<Path> + Send + 's
         }
 
         Ok(seq)
-    }).await.unwrap()
+    })
+    .await
+    .unwrap()
 }

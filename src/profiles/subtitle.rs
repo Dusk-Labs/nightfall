@@ -43,9 +43,10 @@ impl TranscodingProfile for WebvttTranscodeProfile {
             return Ok(());
         }
 
-        Err(NightfallError::ProfileNotSupported(
-            format!("Codec {} not supported.", ctx.input_ctx.codec.as_str())
-        ))
+        Err(NightfallError::ProfileNotSupported(format!(
+            "Codec {} not supported.",
+            ctx.input_ctx.codec.as_str()
+        )))
     }
 
     fn tag(&self) -> &str {
@@ -94,7 +95,7 @@ impl TranscodingProfile for AssExtractProfile {
         }
 
         Err(NightfallError::ProfileNotSupported(
-                "Profile only supports extracting ass subtitles.".into()
+            "Profile only supports extracting ass subtitles.".into(),
         ))
     }
 

@@ -11,19 +11,19 @@
 pub mod error;
 /// Helper methods to probe a mediafile for metadata.
 pub mod ffprobe;
+/// Contains utils that patch segments to make them appear continuous.
+pub mod patch;
 /// Contains all profiles currently implemented.
 pub mod profiles;
 /// Contains the struct representing a streaming session.
 mod session;
 /// Contains utils that make my life easier.
 pub mod utils;
-/// Contains utils that patch segments to make them appear continuous.
-pub mod patch;
 
 use crate::error::*;
+use crate::patch::segment::patch_segment;
 use crate::profiles::*;
 use crate::session::Session;
-use crate::patch::segment::patch_segment;
 
 use std::collections::HashMap;
 use std::time::Duration;
@@ -33,9 +33,9 @@ use async_trait::async_trait;
 use xtra_proc::actor;
 use xtra_proc::handler;
 
+use slog::debug;
 use slog::info;
 use slog::warn;
-use slog::debug;
 
 pub use tokio::process::ChildStdout;
 
@@ -91,7 +91,11 @@ impl StateManager {
         let mut profile_args = profile_args;
 
         let first_tag = profile_chain.first().expect("Empty profile chain.").tag();
-        let chain = profile_chain.iter().map(|x| x.tag()).collect::<Vec<_>>().join(" -> ");
+        let chain = profile_chain
+            .iter()
+            .map(|x| x.tag())
+            .collect::<Vec<_>>()
+            .join(" -> ");
 
         let session_id = uuid::Uuid::new_v4().to_hyphenated().to_string();
         let tag = if let Some(width) = profile_args.output_ctx.width {
@@ -140,7 +144,10 @@ impl StateManager {
         if let Some(status) = session.exit_status.as_ref() {
             if !status.success() {
                 if let Some(x) = session.next_profile() {
-                    info!(self.logger, "Session {}<{}>trying profile {}", &id, chunk, x);
+                    info!(
+                        self.logger,
+                        "Session {}<{}>trying profile {}", &id, chunk, x
+                    );
                     session.reset_to(session.start_num());
                 } else {
                     return Err(NightfallError::ProfileChainExhausted);
@@ -210,7 +217,10 @@ impl StateManager {
                 stats.last_hard_seek = Instant::now();
                 stats.hard_seeked_at = chunk;
 
-                debug!(self.logger, "Resetting {} to chunk {} because user seeked.", &id, chunk);
+                debug!(
+                    self.logger,
+                    "Resetting {} to chunk {} because user seeked.", &id, chunk
+                );
             }
 
             Err(NightfallError::ChunkNotDone)
@@ -225,8 +235,7 @@ impl StateManager {
                 session.cont();
             }
 
-            match patch_segment(log, path, real_segment).await
-            {
+            match patch_segment(log, path, real_segment).await {
                 Ok(seq) => session.real_segment = seq,
                 Err(e) => warn!(self.logger, "Failed to patch segment."; "error" => e.to_string()),
             }

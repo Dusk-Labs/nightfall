@@ -1,10 +1,10 @@
-pub mod segment;
 pub mod init_segment;
+pub mod segment;
 
+use self::init_segment::*;
+use self::segment::*;
 use crate::NightfallError;
 use crate::Result;
-use self::segment::*;
-use self::init_segment::*;
 
 use std::fs::File;
 use std::io::BufReader;

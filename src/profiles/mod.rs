@@ -1,29 +1,29 @@
+#[cfg(windows)]
+pub mod amf;
 pub mod audio;
+#[cfg(all(unix, cuda))]
+pub mod cuda;
 pub mod subtitle;
 #[cfg(all(unix, vaapi))]
 pub mod vaapi;
-#[cfg(all(unix, cuda))]
-pub mod cuda;
 pub mod video;
-#[cfg(windows)]
-pub mod amf;
 
+#[cfg(windows)]
+pub use amf::AmfTranscodeProfile;
 pub use audio::AacTranscodeProfile;
-pub use subtitle::WebvttTranscodeProfile;
-pub use subtitle::AssExtractProfile;
 #[cfg(all(unix, cuda))]
 pub use cuda::CudaTranscodeProfile;
+pub use subtitle::AssExtractProfile;
+pub use subtitle::WebvttTranscodeProfile;
 #[cfg(all(unix, vaapi))]
 pub use vaapi::VaapiTranscodeProfile;
 pub use video::H264TranscodeProfile;
 pub use video::H264TransmuxProfile;
 pub use video::RawVideoTranscodeProfile;
-#[cfg(windows)]
-pub use amf::AmfTranscodeProfile;
 
 use crate::NightfallError;
-use std::lazy::SyncOnceCell;
 use std::fmt::Debug;
+use std::lazy::SyncOnceCell;
 
 static PROFILES: SyncOnceCell<Vec<Box<dyn TranscodingProfile>>> = SyncOnceCell::new();
 

@@ -9,8 +9,8 @@ use std::fs::File;
 use std::io;
 use std::io::Read;
 use std::path::Path;
-use std::process::Stdio;
 use std::process::ExitStatus;
+use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::RwLock;
 use std::time::Duration;
@@ -56,7 +56,7 @@ pub struct Session {
     real_process: Option<Child>,
     pub real_segment: u32,
     // has the first chunk since init has been requested been returned?
-    pub first_chunk_since_init: bool
+    pub first_chunk_since_init: bool,
 }
 
 impl Session {
@@ -80,7 +80,7 @@ impl Session {
             real_process: None,
             hard_timeout: Instant::now() + Duration::from_secs(30 * 60),
             first_chunk_since_init: true,
-            exit_status: None
+            exit_status: None,
         }
     }
 
@@ -92,16 +92,16 @@ impl Session {
         let args = self.profile.build(self.profile_ctx.clone()).unwrap();
 
         let _ = std::fs::create_dir_all(&self.profile_ctx.output_ctx.outdir);
-        let log_file = format!("{}/ffmpeg_{}.log", &self.profile_ctx.output_ctx.outdir, self.profile.tag());
+        let log_file = format!(
+            "{}/ffmpeg_{}.log",
+            &self.profile_ctx.output_ctx.outdir,
+            self.profile.tag()
+        );
 
         let stderr: Stdio = File::create(log_file)?.into();
 
         let stdout: Stdio = if self.profile.stream_type() == StreamType::Subtitle {
-            File::create(format!(
-                "{}/stream",
-                &self.profile_ctx.output_ctx.outdir
-            ))?
-            .into()
+            File::create(format!("{}/stream", &self.profile_ctx.output_ctx.outdir))?.into()
         } else {
             Stdio::piped()
         };
@@ -149,7 +149,11 @@ impl Session {
     }
 
     pub fn stderr(&mut self) -> Option<String> {
-        let file = format!("{}/ffmpeg_{}.log", &self.profile_ctx.output_ctx.outdir, self.profile.tag());
+        let file = format!(
+            "{}/ffmpeg_{}.log",
+            &self.profile_ctx.output_ctx.outdir,
+            self.profile.tag()
+        );
 
         let mut buf = String::new();
         let _ = File::open(file).ok()?.read_to_string(&mut buf);
