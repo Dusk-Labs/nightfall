@@ -141,12 +141,12 @@ impl StateManager {
 
         // If ffmpeg abrupty closes we want to move down the profile chain and try other profiles
         // until we get something that works or we exhaust all our profiles.
-        if let Some(status) = session.exit_status.as_ref() {
+        if let Some(status) = session.exit_status.take() {
             if !status.success() {
                 if let Some(x) = session.next_profile() {
                     info!(
                         self.logger,
-                        "Session {}<{}>trying profile {}", &id, chunk, x
+                        "Session {} chunk={} trying profile {}", &id, chunk, x
                     );
                     session.reset_to(session.start_num());
                 } else {
