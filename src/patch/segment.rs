@@ -105,6 +105,14 @@ impl Segment {
         self
     }
 
+    pub fn set_styp(mut self) -> Self {
+        if let Some(styp) = self.styp.as_mut() {
+            styp.box_type = BoxType::StypBox;
+        }
+
+        self
+    }
+
     pub fn set_segno(mut self, seq: u32) -> Self {
         if let Some(moof) = self.moof.as_mut() {
             moof.mfhd.sequence_number = seq;

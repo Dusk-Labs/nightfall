@@ -131,6 +131,7 @@ pub async fn patch_init_segment(
             // segment number.
             segment
                 .gen_styp()
+                .set_styp()
                 .normalize_dts()
                 .set_segno(seq)
                 .write(&mut f)?;
