@@ -11,6 +11,7 @@ documentation = "https://docs.rs/nightfall"
 [features]
 vaapi = ["rusty_vainfo"]
 cuda = []
+ssa_transmux = []
 
 default = ["cuda"]
 

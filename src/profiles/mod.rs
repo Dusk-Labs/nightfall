@@ -13,6 +13,7 @@ pub use amf::AmfTranscodeProfile;
 pub use audio::AacTranscodeProfile;
 #[cfg(all(unix, feature = "cuda"))]
 pub use cuda::CudaTranscodeProfile;
+#[cfg(feature = "ssa_transmux")]
 pub use subtitle::AssExtractProfile;
 pub use subtitle::WebvttTranscodeProfile;
 #[cfg(all(unix, feature = "vaapi"))]
@@ -34,6 +35,7 @@ pub fn profiles_init(log: slog::Logger, _ffmpeg_bin: String) {
         box H264TransmuxProfile,
         box RawVideoTranscodeProfile,
         box WebvttTranscodeProfile,
+        #[cfg(feature = "ssa_transmux")]
         box AssExtractProfile,
         #[cfg(all(unix, feature = "cuda"))]
         box CudaTranscodeProfile,

@@ -58,9 +58,11 @@ impl TranscodingProfile for WebvttTranscodeProfile {
     }
 }
 
+#[cfg(feature = "ssa_transmux")]
 #[derive(Debug)]
 pub struct AssExtractProfile;
 
+#[cfg(feature = "ssa_transmux")]
 impl TranscodingProfile for AssExtractProfile {
     fn profile_type(&self) -> ProfileType {
         ProfileType::Transmux
