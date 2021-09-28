@@ -21,6 +21,7 @@ mod session;
 pub mod utils;
 
 use crate::error::*;
+use crate::patch::init_segment::patch_init_segment;
 use crate::patch::segment::patch_segment;
 use crate::profiles::*;
 use crate::session::Session;
@@ -174,6 +175,8 @@ impl StateManager {
         }
 
         if session.is_chunk_done(chunk) {
+            // reset chunk since init counter
+            session.chunks_since_init = 0;
             return Ok(session.init_seg());
         }
 
@@ -237,10 +240,33 @@ impl StateManager {
 
             match patch_segment(log, path, real_segment).await {
                 Ok(seq) => session.real_segment = seq,
+                // Sometimes we get partial chunks, when playback goes linearly (no hard seeks have
+                // occured) we can ignore this, but when the user seeks, the player doesnt query
+                // `init.mp4` again, so we have to move the video data from `init.mp4` into
+                // `N.m4s`.
+                Err(NightfallError::PartialSegment(_)) => {
+                    if session.chunks_since_init >= 1 {
+                        debug!(self.logger, "Got a partial segment, patching because the user has most likely seeked.");
+                        match patch_init_segment(
+                            self.logger.clone(),
+                            session.init_seg(),
+                            chunk_path.clone(),
+                            real_segment,
+                        )
+                        .await
+                        {
+                            Ok(seq) => session.real_segment = seq,
+                            Err(e) => {
+                                warn!(self.logger, "Failed to patch init segment."; "error" => e.to_string())
+                            }
+                        }
+                    }
+                }
                 Err(e) => warn!(self.logger, "Failed to patch segment."; "error" => e.to_string()),
             }
 
             session.reset_timeout(chunk);
+            session.chunks_since_init += 1;
 
             Ok(chunk_path)
         }

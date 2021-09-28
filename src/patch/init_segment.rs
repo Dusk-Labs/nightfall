@@ -1,9 +1,15 @@
 use std::collections::VecDeque;
 use std::fs::File;
-use std::io::*;
+use std::io::prelude::*;
+use std::io::BufReader;
+use std::io::Seek;
+use std::io::SeekFrom;
+use std::path::Path;
 
 use super::segment::Segment;
 use crate::Result;
+
+use tokio::task::spawn_blocking;
 
 use mp4::mp4box::*;
 use slog::warn;
@@ -77,6 +83,11 @@ impl InitSegment {
         Ok(segment)
     }
 
+    /// Method will check if this init segment contains any real segments.
+    pub fn contains_segments(&self) -> bool {
+        !self.segments.is_empty()
+    }
+
     pub fn normalize_and_dump(self, file: &mut File) -> Result<()> {
         if let Some(ftyp) = self.ftyp {
             ftyp.write_box(file)?;
@@ -91,4 +102,47 @@ impl InitSegment {
 
         Ok(())
     }
+}
+
+/// Function reads a init segment and moves audio-visual data over from the init segment into
+/// `segment`.
+///
+/// # Arguments
+/// * `log` - logger instance for debugging
+/// * `init` - Path to the initialization segment.
+/// * `segment` - Path to the segment
+/// * `seq` - starting sequence number
+pub async fn patch_init_segment(
+    log: slog::Logger,
+    init: impl AsRef<Path> + Send + 'static,
+    segment_path: impl AsRef<Path> + Send + 'static,
+    mut seq: u32,
+) -> Result<u32> {
+    spawn_blocking(move || {
+        let f = File::open(&init)?;
+        let size = f.metadata()?.len();
+        let mut reader = BufReader::new(f);
+
+        let mut segment = InitSegment::from_reader(&mut reader, size, log.clone())?;
+
+        let mut f = File::create(&segment_path)?;
+        while let Some(segment) = segment.segments.pop_front() {
+            // Here we normalize the DTS to be equal to the EPT/PTS and we also set the corrent
+            // segment number.
+            segment
+                .gen_styp()
+                .normalize_dts()
+                .set_segno(seq)
+                .write(&mut f)?;
+
+            seq += 1;
+        }
+
+        let mut f = File::create(&init)?;
+        segment.normalize_and_dump(&mut f)?;
+
+        Ok(seq)
+    })
+    .await
+    .unwrap()
 }

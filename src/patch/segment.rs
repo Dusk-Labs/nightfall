@@ -6,7 +6,9 @@ use std::io::Seek;
 use std::io::SeekFrom;
 use std::path::Path;
 
+use crate::NightfallError;
 use crate::Result;
+
 use slog::debug;
 use tokio::task::spawn_blocking;
 
@@ -82,6 +84,13 @@ impl Segment {
 
         // NOTE: In some cases, we could get here without a complete segment existing.
         Ok((segment, size))
+    }
+
+    /// Sometimes ffmpeg will output a bare initial segment.
+    /// This method allows us to detect such segments and apply a fix if we want accurate seeks.
+    /// An empty segment consists of a segment with only a `styp` box.
+    pub fn is_empty_segment(&self) -> bool {
+        self.styp.is_some() && self.sidx.is_none() && self.moof.is_none() && self.mdat.is_none()
     }
 
     /// Method will create a styp box for this segment if it doesnt exist
@@ -166,6 +175,15 @@ pub async fn patch_segment(
             let (segment, new_position) = Segment::from_reader(&mut reader, size, log.clone())?;
             segments.push_back(segment);
             current = new_position;
+        }
+
+        // Sometimes we get partial segments, ie empty segments where the data is actually in the
+        // init segment. This is a problem when hard seeking as we lose out on ~5s of data, thus we
+        // fix by patching the init segment and moving the data over.
+        if segments.len() == 1 && segments[0].is_empty_segment() {
+            return Err(NightfallError::PartialSegment(
+                segments.pop_front().unwrap(),
+            ));
         }
 
         let mut f = File::create(&file)?;

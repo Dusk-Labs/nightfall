@@ -55,8 +55,8 @@ pub struct Session {
     child_pid: Option<u32>,
     real_process: Option<Child>,
     pub real_segment: u32,
-    // has the first chunk since init has been requested been returned?
-    pub first_chunk_since_init: bool,
+    /// How many chunks have we returned so far since init.mp4 was returned.
+    pub chunks_since_init: u32,
 }
 
 impl Session {
@@ -79,7 +79,7 @@ impl Session {
             child_pid: None,
             real_process: None,
             hard_timeout: Instant::now() + Duration::from_secs(30 * 60),
-            first_chunk_since_init: true,
+            chunks_since_init: 0,
             exit_status: None,
         }
     }
