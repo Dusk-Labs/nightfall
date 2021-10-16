@@ -177,7 +177,7 @@ impl Session {
         false
     }
 
-    pub fn is_hard_timeout(&mut self) -> bool {
+    pub fn is_hard_timeout(&self) -> bool {
         Instant::now() > self.hard_timeout
     }
 

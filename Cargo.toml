@@ -1,6 +1,6 @@
 [package]
 name = "nightfall"
-version = "0.3.4"
+version = "0.3.5"
 authors = ["Valerian G. <valerian.garleanu@pm.me>"]
 edition = "2018"
 license = "GPL-2.0"
@@ -30,6 +30,7 @@ xtra_proc = "0.1.0"
 tokio = { version = "1.5.0", features = ["process", "io-util", "io-std", "macros", "time", "rt"] }
 tokio-stream = { version = "0.1.5", features = ["io-util"] }
 mp4 = { git = "https://github.com/vgarleanu/mp4-rust" }
+once_cell = "1.8.0"
 
 [target.'cfg(unix)'.dependencies]
 nix = "0.20.0"

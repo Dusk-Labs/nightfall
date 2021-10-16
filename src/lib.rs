@@ -1,11 +1,4 @@
 #![doc = include_str!("../README.md")]
-#![feature(
-    assert_matches,
-    result_flattening,
-    hash_drain_filter,
-    box_syntax,
-    once_cell
-)]
 
 /// Contains all the error types for this crate.
 pub mod error;
@@ -366,17 +359,16 @@ impl StateManager {
     #[handler]
     async fn garbage_collect(&mut self) -> Result<()> {
         #[allow(clippy::ptr_arg)]
-        fn collect(_: &String, session: &mut Session) -> bool {
-            if session.is_hard_timeout() {
-                return true;
-            } else if session.try_wait() {
-                return false;
-            }
-
-            false
+        fn collect((_, session): &(&String, &Session)) -> bool {
+            session.is_hard_timeout()
         }
 
-        let mut to_reap: HashMap<_, _> = self.sessions.drain_filter(collect).collect();
+        // FIXME: This can be a drain_filter once #59618 hits stable.
+        let mut to_reap: HashMap<_, _> = {
+            let to_reap: Vec<_> = self.sessions.iter().filter(collect).map(|(k, _)| k.clone()).collect();
+
+            to_reap.into_iter().filter_map(|k| self.sessions.remove_entry(&k)).collect()
+        };
 
         if !to_reap.is_empty() {
             info!(self.logger, "Reaping {} streams", to_reap.len());
@@ -384,7 +376,7 @@ impl StateManager {
 
         for (k, v) in to_reap.iter_mut() {
             self.exit_statuses
-                .insert(k.clone(), v.stderr().unwrap_or_default());
+                .insert(k.to_string(), v.stderr().unwrap_or_default());
             v.join().await;
             v.delete_tmp();
         }

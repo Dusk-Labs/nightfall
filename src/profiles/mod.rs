@@ -24,25 +24,26 @@ pub use video::RawVideoTranscodeProfile;
 
 use crate::NightfallError;
 use std::fmt::Debug;
-use std::lazy::SyncOnceCell;
 
-static PROFILES: SyncOnceCell<Vec<Box<dyn TranscodingProfile>>> = SyncOnceCell::new();
+use once_cell::sync::OnceCell;
+
+static PROFILES: OnceCell<Vec<Box<dyn TranscodingProfile>>> = OnceCell::new();
 
 pub fn profiles_init(log: slog::Logger, _ffmpeg_bin: String) {
     let profiles: Vec<Box<dyn TranscodingProfile>> = vec![
-        box AacTranscodeProfile,
-        box H264TranscodeProfile,
-        box H264TransmuxProfile,
-        box RawVideoTranscodeProfile,
-        box WebvttTranscodeProfile,
+        Box::new(AacTranscodeProfile),
+        Box::new(H264TranscodeProfile),
+        Box::new(H264TransmuxProfile),
+        Box::new(RawVideoTranscodeProfile),
+        Box::new(WebvttTranscodeProfile),
         #[cfg(feature = "ssa_transmux")]
-        box AssExtractProfile,
+        Box::new(AssExtractProfile),
         #[cfg(all(unix, feature = "cuda"))]
-        box CudaTranscodeProfile,
+        Box::new(CudaTranscodeProfile),
         #[cfg(all(unix, feature = "vaapi"))]
-        box VaapiTranscodeProfile::default(),
+        Box::new(VaapiTranscodeProfile::default()),
         #[cfg(windows)]
-        box AmfTranscodeProfile,
+        Box::new(AmfTranscodeProfile),
     ];
 
     let _ = PROFILES.set(
