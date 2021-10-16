@@ -363,6 +363,11 @@ impl StateManager {
             session.is_hard_timeout()
         }
 
+        // we want to check whether any session's ffmpeg process has died unexpectedly.
+        for session in self.sessions.values_mut() {
+            session.try_wait();
+        }
+
         // FIXME: This can be a drain_filter once #59618 hits stable.
         let mut to_reap: HashMap<_, _> = {
             let to_reap: Vec<_> = self.sessions.iter().filter(collect).map(|(k, _)| k.clone()).collect();
