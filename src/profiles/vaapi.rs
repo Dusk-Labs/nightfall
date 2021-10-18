@@ -197,7 +197,6 @@ impl TranscodingProfile for VaapiTranscodeProfile {
 
             args.push(vfilter.join(","));
         } else {
-            args.push("-vf".into());
             args.push("hwdownload,format=nv12,hwupload".into());
         }
 
