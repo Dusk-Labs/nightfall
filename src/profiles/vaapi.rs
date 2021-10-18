@@ -170,21 +170,32 @@ impl TranscodingProfile for VaapiTranscodeProfile {
             "h264_vaapi".into(),
         ];
 
+        args.push("-vf".into());
+
         if let Some(height) = ctx.output_ctx.height {
+            let mut vfilter = Vec::new();
             let width = ctx.output_ctx.width.unwrap_or(-2); // defaults to scaling by 2
-            args.push("-vf".into());
+            
+            if self.hw_scaling_supported() {
+                vfilter.push(format!("scale_vaapi={}:{}", height, width));
+            }
+
+            vfilter.push("hwdownload".into());
+
+            // TODO: Detect if input file is 10-bit with a less hacky way.
+            if ctx.input_ctx.profile.as_str() == "Main 10" {
+                vfilter.push("format=p010le".into());
+            }
+
+            vfilter.push("format=nv12".into());
 
             if !self.hw_scaling_supported() {
-                args.push(format!(
-                    "hwdownload,format=nv12,scale={}:{},hwupload",
-                    height, width
-                ));
-            } else {
-                args.push(format!(
-                    "scale_vaapi={}:{},hwdownload,format=nv12,hwupload",
-                    height, width
-                ));
+                vfilter.push(format!("scale={}:{}", height, width));
             }
+
+            vfilter.push("hwupload".into());
+                
+            args.push(vfilter.join(","));
         } else {
             args.push("-vf".into());
             args.push("hwdownload,format=nv12,hwupload".into());
@@ -274,19 +285,36 @@ impl TranscodingProfile for VaapiTranscodeProfile {
     /// This profile technically could work on any codec since the codec is just `copy` here, but
     /// the container doesnt support it, so we will be constricting it down.
     fn supports(&self, ctx: &ProfileContext) -> Result<(), NightfallError> {
-        if ctx.input_ctx.codec != ctx.output_ctx.codec || ctx.input_ctx.codec != "h264" {
+        let decode_entrypoint = "VAEntrypointVLD".to_string();
+
+        if !["h264", "hevc"].contains(&ctx.input_ctx.codec.as_str()) {
             return Err(NightfallError::ProfileNotSupported(
-                "Profile only supports h264 input and output streams.".into(),
+                    "Profile only supports decoding h264 or h265 video streams.".into(),
             ));
         }
 
-        let profile = match ctx.input_ctx.profile.as_str() {
-            "High" => "VAProfileH264High",
-            "Main" => "VAProfileH264Main",
-            "Baseline" => "VAProfileH264Baseline",
-            _ => {
+        // NOTE: Checks if the HWAccel device supports decoding HEVC content.
+        if ctx.input_ctx.codec == "hevc" && self.profiles.iter().find(|x| x.name == "VAProfileHEVCMain" && x.entrypoints.contains(&decode_entrypoint)).is_none() {
+            return Err(NightfallError::ProfileNotSupported(
+                    "HW Acceleration device doesnt support decoding hevc content.".into(),
+            ));
+        }
+
+        if ctx.output_ctx.codec != "h264" {
+            return Err(NightfallError::ProfileNotSupported(
+                "Profile only supports h264 output streams.".into(),
+            ));
+        }
+
+        let profile = match [ctx.input_ctx.codec.as_str(), ctx.input_ctx.profile.as_str()] {
+            ["h264", "High"] => "VAProfileH264High",
+            ["h264", "Main"] => "VAProfileH264Main",
+            ["h264", "Baseline"] => "VAProfileH264Baseline",
+            ["hevc", "Main"] => "VAProfileHEVCMain",
+            ["hevc", "Main 10"] => "VAProfileHEVCMain10",
+            [codec, profile] => {
                 return Err(NightfallError::ProfileNotSupported(
-                    "Profile not supported by device.".into(),
+                    format!("Profile {} for {} not supported by device.", profile, codec)
                 ))
             }
         };
