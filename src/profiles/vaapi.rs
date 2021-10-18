@@ -6,6 +6,9 @@ use super::TranscodingProfile;
 use crate::session::CHUNK_SIZE;
 use crate::NightfallError;
 
+use std::fs;
+use std::path::PathBuf;
+
 /// Vaapi transcoding profiles.
 /// This is a unix exclusive transcoding profile that leverages vaapi. This profile will
 /// automatically be enabled if any of your GPUs support encoding and decoding h264 with the
@@ -16,17 +19,55 @@ use crate::NightfallError;
 pub struct VaapiTranscodeProfile {
     profiles: Vec<rusty_vainfo::Profile>,
     vendor: String,
+    dri: PathBuf,
 }
 
 impl Default for VaapiTranscodeProfile {
     fn default() -> Self {
-        let (vendor, profiles) = if let Ok(x) = rusty_vainfo::VaInstance::new() {
-            (x.vendor_string(), x.profiles().unwrap_or_default())
-        } else {
-            ("<null_device>".to_string(), Default::default())
-        };
+        let hw_targets = fs::read_dir("/dev/dri")
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|x| x.file_name().to_string_lossy().find("render").is_some())
+            .map(|x| x.path())
+            .collect::<Vec<_>>();
 
-        Self { profiles, vendor }
+        for target in hw_targets {
+            if let Ok(x) = rusty_vainfo::VaInstance::with_drm(&target) {
+                return Self {
+                    profiles: x.profiles().unwrap_or_default(),
+                    vendor: x.vendor_string(),
+                    dri: target,
+                };
+            }
+        }
+
+        Self {
+            profiles: Vec::new(),
+            vendor: "<null_device>".into(),
+            dri: PathBuf::new(),
+        }
+    }
+}
+
+impl VaapiTranscodeProfile {
+    fn hw_scaling_supported(&self) -> bool {
+        let required_profiles = ["VAProfileH264Main", "VAProfileH264High"];
+
+        let enc_slice = "VAEntrypointEncSlice".to_string();
+
+        for profile in required_profiles {
+            let device_profile = if let Some(x) = self.profiles.iter().find(|x| x.name == profile) {
+                x
+            } else {
+                continue;
+            };
+
+            // NOTE: We should probably warn the client here that scaling wont work because they
+            // possibly have the free intel quicksync driver installed (if dri is a intel igpu).
+            return device_profile.entrypoints.contains(&enc_slice);
+        }
+
+        false
     }
 }
 
@@ -46,7 +87,10 @@ impl TranscodingProfile for VaapiTranscodeProfile {
 
     fn is_enabled(&self) -> Result<(), NightfallError> {
         // Currently this profile only supports HW Encoding + decoding.
-        let required_features = ["VAEntrypointEncSlice", "VAEntrypointVLD"];
+        let required_features = [
+            "VAEntrypointEncSlice".to_string(),
+            "VAEntrypointVLD".to_string(),
+        ];
 
         // NOTE: These could technically be less restrictive and we could match for them inside
         // build. Although I doubt that there are actually any devices that dont support all three
@@ -75,10 +119,19 @@ impl TranscodingProfile for VaapiTranscodeProfile {
             )?;
 
             for feature in required_features {
-                if !device_profile.entrypoints.contains(&feature.to_string()) {
+                if !&device_profile.entrypoints.contains(&feature) {
                     continue;
                 }
             }
+
+            // NOTE: We should probably warn the client here that scaling wont work because they
+            // possibly have the free intel quicksync driver installed (if dri is a intel igpu).
+            /*
+            if !device_profile.entrypoints.contains("VAEntrypointEncSlice") &&
+                device_profile.entrypoints.contains("VAEntrypointEncSliceLP") {
+                    return Ok(());
+            }
+            */
 
             // we really only care if one of the profiles supports both enc+dec as this step only
             // checks whether the device supports hw decoding in general.
@@ -101,6 +154,8 @@ impl TranscodingProfile for VaapiTranscodeProfile {
         let mut args = vec![
             "-hwaccel".into(),
             "vaapi".into(),
+            "-vaapi_device".into(),
+            self.dri.to_string_lossy().into(),
             "-hwaccel_output_format".into(),
             "vaapi".into(),
             "-y".into(),
@@ -118,12 +173,34 @@ impl TranscodingProfile for VaapiTranscodeProfile {
         if let Some(height) = ctx.output_ctx.height {
             let width = ctx.output_ctx.width.unwrap_or(-2); // defaults to scaling by 2
             args.push("-vf".into());
-            args.push(format!("scale={}:{}", height, width));
+
+            if !self.hw_scaling_supported() {
+                args.push(format!(
+                    "hwdownload,format=nv12,scale={}:{},hwupload",
+                    height, width
+                ));
+            } else {
+                args.push(format!(
+                    "scale_vaapi={}:{},hwdownload,format=nv12,hwupload",
+                    height, width
+                ));
+            }
+        } else {
+            args.push("-vf".into());
+            args.push("hwdownload,format=nv12,hwupload".into());
         }
 
         if let Some(bitrate) = ctx.output_ctx.bitrate {
-            args.push("-b:v".into());
-            args.push(bitrate.to_string());
+            // NOTE: it seems that when the non-free qsv driver is not installed then we cant use
+            // -b:v. This might be a way to detect whether we can use -b:v flag but im not too
+            // sure.
+            if !self.hw_scaling_supported() {
+                args.push("-maxrate".into());
+                args.push(bitrate.to_string());
+            } else {
+                args.push("-b:v".into());
+                args.push(bitrate.to_string());
+            }
         }
 
         args.append(&mut vec![
@@ -138,8 +215,6 @@ impl TranscodingProfile for VaapiTranscodeProfile {
             "120".into(),
             "-g".into(),
             "120".into(),
-            "-vf".into(),
-            "hwdownload,format=nv12,hwupload".into(),
             "-frag_duration".into(),
             "5000000".into(),
             "-movflags".into(),
