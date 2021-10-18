@@ -28,9 +28,9 @@ use xtra_proc::actor;
 use xtra_proc::handler;
 
 use slog::debug;
+use slog::error;
 use slog::info;
 use slog::warn;
-use slog::error;
 
 pub use tokio::process::ChildStdout;
 

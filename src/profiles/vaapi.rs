@@ -168,6 +168,8 @@ impl TranscodingProfile for VaapiTranscodeProfile {
             stream,
             "-c:0".into(),
             "h264_vaapi".into(),
+            "-bf".into(),
+            "0".into(),
         ];
 
         args.push("-vf".into());
@@ -175,7 +177,7 @@ impl TranscodingProfile for VaapiTranscodeProfile {
         if let Some(height) = ctx.output_ctx.height {
             let mut vfilter = Vec::new();
             let width = ctx.output_ctx.width.unwrap_or(-2); // defaults to scaling by 2
-            
+
             if self.hw_scaling_supported() {
                 vfilter.push(format!("scale_vaapi={}:{}", height, width));
             }
@@ -194,7 +196,7 @@ impl TranscodingProfile for VaapiTranscodeProfile {
             }
 
             vfilter.push("hwupload".into());
-                
+
             args.push(vfilter.join(","));
         } else {
             args.push("-vf".into());
@@ -266,7 +268,7 @@ impl TranscodingProfile for VaapiTranscodeProfile {
             // NOTE: This might fix the seeking bug
             "expr:gte(t,n_forced*5)".into(),
             "-sc_threshold:v:0".into(),
-            "0".into()
+            "0".into(),
         ]);
 
         args.append(&mut vec!["-hls_segment_type".into(), 1.to_string()]);
@@ -289,14 +291,22 @@ impl TranscodingProfile for VaapiTranscodeProfile {
 
         if !["h264", "hevc"].contains(&ctx.input_ctx.codec.as_str()) {
             return Err(NightfallError::ProfileNotSupported(
-                    "Profile only supports decoding h264 or h265 video streams.".into(),
+                "Profile only supports decoding h264 or h265 video streams.".into(),
             ));
         }
 
         // NOTE: Checks if the HWAccel device supports decoding HEVC content.
-        if ctx.input_ctx.codec == "hevc" && self.profiles.iter().find(|x| x.name == "VAProfileHEVCMain" && x.entrypoints.contains(&decode_entrypoint)).is_none() {
+        if ctx.input_ctx.codec == "hevc"
+            && self
+                .profiles
+                .iter()
+                .find(|x| {
+                    x.name == "VAProfileHEVCMain" && x.entrypoints.contains(&decode_entrypoint)
+                })
+                .is_none()
+        {
             return Err(NightfallError::ProfileNotSupported(
-                    "HW Acceleration device doesnt support decoding hevc content.".into(),
+                "HW Acceleration device doesnt support decoding hevc content.".into(),
             ));
         }
 
@@ -313,9 +323,10 @@ impl TranscodingProfile for VaapiTranscodeProfile {
             ["hevc", "Main"] => "VAProfileHEVCMain",
             ["hevc", "Main 10"] => "VAProfileHEVCMain10",
             [codec, profile] => {
-                return Err(NightfallError::ProfileNotSupported(
-                    format!("Profile {} for {} not supported by device.", profile, codec)
-                ))
+                return Err(NightfallError::ProfileNotSupported(format!(
+                    "Profile {} for {} not supported by device.",
+                    profile, codec
+                )))
             }
         };
 
