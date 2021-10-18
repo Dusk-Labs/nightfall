@@ -62,7 +62,13 @@ impl TranscodingProfile for CudaTranscodeProfile {
         if let Some(height) = ctx.output_ctx.height {
             let width = ctx.output_ctx.width.unwrap_or(-2); // defaults to scaling by 2
             args.push("-vf".into());
-            args.push(format!("scale={}:{}", height, width));
+            args.push(format!(
+                "hwdownload,scale={}:{},format=nv12,hwupload",
+                height, width
+            ));
+        } else {
+            args.push("-vf".into());
+            args.push("hwdownload,format=nv12,hwupload".into());
         }
 
         if let Some(bitrate) = ctx.output_ctx.bitrate {
@@ -82,8 +88,6 @@ impl TranscodingProfile for CudaTranscodeProfile {
             "120".into(),
             "-g".into(),
             "120".into(),
-            "-vf".into(),
-            "hwdownload,format=nv12,hwupload".into(),
             "-frag_duration".into(),
             "5000000".into(),
             "-movflags".into(),
