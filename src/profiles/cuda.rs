@@ -57,18 +57,14 @@ impl TranscodingProfile for CudaTranscodeProfile {
             stream,
             "-c:0".into(),
             "h264_nvenc".into(),
+            "-bf".into(),
+            "0".into(),
         ];
 
         if let Some(height) = ctx.output_ctx.height {
             let width = ctx.output_ctx.width.unwrap_or(-2); // defaults to scaling by 2
             args.push("-vf".into());
-            args.push(format!(
-                "hwdownload,scale={}:{},format=nv12,hwupload",
-                height, width
-            ));
-        } else {
-            args.push("-vf".into());
-            args.push("hwdownload,format=nv12,hwupload".into());
+            args.push(format!("scale_cuda={}:{}", height, width));
         }
 
         if let Some(bitrate) = ctx.output_ctx.bitrate {
@@ -125,7 +121,7 @@ impl TranscodingProfile for CudaTranscodeProfile {
 
         args.append(&mut vec![
             "-force_key_frames".into(),
-            "expr:gte(t,n_forced*5.00))".into(),
+            "expr:gte(t,n_forced*5.00)".into(),
         ]);
 
         args.append(&mut vec!["-hls_segment_type".into(), 1.to_string()]);
