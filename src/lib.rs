@@ -30,6 +30,7 @@ use xtra_proc::handler;
 use slog::debug;
 use slog::info;
 use slog::warn;
+use slog::error;
 
 pub use tokio::process::ChildStdout;
 
@@ -84,7 +85,13 @@ impl StateManager {
     ) -> Result<String> {
         let mut profile_args = profile_args;
 
-        let first_tag = profile_chain.first().expect("Empty profile chain.").tag();
+        let first_tag = if let Some(x) = profile_chain.first() {
+            x.tag()
+        } else {
+            error!(self.logger, "Supplied profile chain is empty"; "profile" => format!("{:?}", profile_args));
+            return Err(NightfallError::ProfileChainExhausted);
+        };
+
         let chain = profile_chain
             .iter()
             .map(|x| x.tag())
