@@ -227,7 +227,7 @@ impl TranscodingProfile for VaapiTranscodeProfile {
             "-f".into(),
             "hls".into(),
             "-start_number".into(),
-            start_num,
+            start_num.clone(),
         ]);
 
         // needed so that in progress segments are named `tmp` and then renamed after the data is
@@ -252,7 +252,10 @@ impl TranscodingProfile for VaapiTranscodeProfile {
 
         args.append(&mut vec![
             "-force_key_frames".into(),
-            "expr:if(isnan(prev_forced_t),eq(t,t),gte(t,prev_forced_t+5.00))".into(),
+            // NOTE: This might fix the seeking bug
+            "expr:gte(t,n_forced*5)".into(),
+            "-sc_threshold:v:0".into(),
+            "0".into()
         ]);
 
         args.append(&mut vec!["-hls_segment_type".into(), 1.to_string()]);

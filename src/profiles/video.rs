@@ -79,7 +79,7 @@ impl TranscodingProfile for H264TransmuxProfile {
 
         args.append(&mut vec![
             "-force_key_frames".into(),
-            "expr:if(isnan(prev_forced_t),eq(t,t),gte(t,prev_forced_t+5.00))".into(),
+            "expr:gte(t,n_forced*5)".into(),
         ]);
 
         args.append(&mut vec!["-hls_segment_type".into(), 1.to_string()]);
