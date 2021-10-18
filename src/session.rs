@@ -8,6 +8,7 @@ use std::fs;
 use std::fs::File;
 use std::io;
 use std::io::Read;
+use std::io::Write;
 use std::path::Path;
 use std::process::ExitStatus;
 use std::process::Stdio;
@@ -98,7 +99,12 @@ impl Session {
             self.profile.tag()
         );
 
-        let stderr: Stdio = File::create(log_file)?.into();
+        let mut stderr = File::create(log_file)?;
+        let _ = stderr.write(args.as_slice().join(" ").as_ref());
+        let _ = stderr.write(b"\n");
+        let _ = stderr.flush();
+
+        let stderr: Stdio = stderr.into();
 
         let stdout: Stdio = if self.profile.stream_type() == StreamType::Subtitle {
             File::create(format!("{}/stream", &self.profile_ctx.output_ctx.outdir))?.into()
