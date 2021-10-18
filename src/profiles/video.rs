@@ -162,7 +162,7 @@ impl TranscodingProfile for H264TranscodeProfile {
             "-c:0".into(),
             "libx264".into(),
             "-preset".into(),
-            "veryfast".into(),
+            "ultrafast".into(),
             // FIXME: Basically atm when we patch the segments before returning to the user we
             // modify DTS to be correct otherwise when seeking the player breaks on chrome. Now the
             // issue is that when we have B-frames PTS != DTS so we must calculate it properly.

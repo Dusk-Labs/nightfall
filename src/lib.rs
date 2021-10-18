@@ -370,9 +370,17 @@ impl StateManager {
 
         // FIXME: This can be a drain_filter once #59618 hits stable.
         let mut to_reap: HashMap<_, _> = {
-            let to_reap: Vec<_> = self.sessions.iter().filter(collect).map(|(k, _)| k.clone()).collect();
+            let to_reap: Vec<_> = self
+                .sessions
+                .iter()
+                .filter(collect)
+                .map(|(k, _)| k.clone())
+                .collect();
 
-            to_reap.into_iter().filter_map(|k| self.sessions.remove_entry(&k)).collect()
+            to_reap
+                .into_iter()
+                .filter_map(|k| self.sessions.remove_entry(&k))
+                .collect()
         };
 
         if !to_reap.is_empty() {
