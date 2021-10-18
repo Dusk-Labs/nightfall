@@ -30,21 +30,23 @@ use once_cell::sync::OnceCell;
 static PROFILES: OnceCell<Vec<Box<dyn TranscodingProfile>>> = OnceCell::new();
 
 pub fn profiles_init(log: slog::Logger, _ffmpeg_bin: String) {
-    let profiles: Vec<Box<dyn TranscodingProfile>> = vec![
-        Box::new(AacTranscodeProfile),
-        Box::new(H264TranscodeProfile),
-        Box::new(H264TransmuxProfile),
-        Box::new(RawVideoTranscodeProfile),
-        Box::new(WebvttTranscodeProfile),
+    let profiles: Vec<Option<Box<dyn TranscodingProfile>>> = vec![
+        Some(Box::new(AacTranscodeProfile)),
+        Some(Box::new(H264TranscodeProfile)),
+        Some(Box::new(H264TransmuxProfile)),
+        Some(Box::new(RawVideoTranscodeProfile)),
+        Some(Box::new(WebvttTranscodeProfile)),
         #[cfg(feature = "ssa_transmux")]
-        Box::new(AssExtractProfile),
+        Some(Box::new(AssExtractProfile)),
         #[cfg(all(unix, feature = "cuda"))]
-        Box::new(CudaTranscodeProfile),
+        Some(Box::new(CudaTranscodeProfile)),
         #[cfg(all(unix, feature = "vaapi"))]
-        Box::new(VaapiTranscodeProfile::default()),
+        VaapiTranscodeProfile::new().map(|x| Box::new(x) as _),
         #[cfg(windows)]
-        Box::new(AmfTranscodeProfile),
+        Some(Box::new(AmfTranscodeProfile)),
     ];
+
+    let profiles = profiles.into_iter().filter_map(|x| x).collect::<Vec<_>>();
 
     let _ = PROFILES.set(
         profiles

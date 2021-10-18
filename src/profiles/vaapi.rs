@@ -22,10 +22,10 @@ pub struct VaapiTranscodeProfile {
     dri: PathBuf,
 }
 
-impl Default for VaapiTranscodeProfile {
-    fn default() -> Self {
+impl VaapiTranscodeProfile {
+    pub fn new() -> Option<Self> {
         let hw_targets = fs::read_dir("/dev/dri")
-            .unwrap()
+            .ok()?
             .filter_map(Result::ok)
             .filter(|x| x.file_name().to_string_lossy().find("render").is_some())
             .map(|x| x.path())
@@ -33,23 +33,21 @@ impl Default for VaapiTranscodeProfile {
 
         for target in hw_targets {
             if let Ok(x) = rusty_vainfo::VaInstance::with_drm(&target) {
-                return Self {
+                return Some(Self {
                     profiles: x.profiles().unwrap_or_default(),
                     vendor: x.vendor_string(),
                     dri: target,
-                };
+                });
             }
         }
 
-        Self {
+        Some(Self {
             profiles: Vec::new(),
             vendor: "<null_device>".into(),
             dri: PathBuf::new(),
-        }
+        })
     }
-}
 
-impl VaapiTranscodeProfile {
     fn hw_scaling_supported(&self) -> bool {
         let required_profiles = ["VAProfileH264Main", "VAProfileH264High"];
 
