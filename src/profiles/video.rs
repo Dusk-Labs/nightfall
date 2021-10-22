@@ -98,12 +98,6 @@ impl TranscodingProfile for H264TransmuxProfile {
     /// This profile technically could work on any codec since the codec is just `copy` here, but
     /// the container doesnt support it, so we will be constricting it down.
     fn supports(&self, ctx: &ProfileContext) -> Result<(), NightfallError> {
-        if ctx.input_ctx.bframes.unwrap_or(0) != 0 {
-            return Err(NightfallError::ProfileNotSupported(
-                "Transmuxing streams containing b-frames is currently not supported.".into(),
-            ));
-        }
-
         if ctx.output_ctx.height.is_some()
             || ctx.output_ctx.width.is_some()
             || ctx.output_ctx.bitrate.is_some()
