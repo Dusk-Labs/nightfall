@@ -58,6 +58,7 @@ pub struct Session {
     pub real_segment: u32,
     /// How many chunks have we returned so far since init.mp4 was returned.
     pub chunks_since_init: u32,
+    pub is_direct_play: bool,
 }
 
 impl Session {
@@ -65,6 +66,7 @@ impl Session {
         id: String,
         mut profile_chain: Vec<&'static dyn TranscodingProfile>,
         profile_ctx: ProfileContext,
+        is_direct_play: bool,
     ) -> Self {
         let profile = profile_chain.pop().expect("Profile chain is empty.");
         Self {
@@ -82,6 +84,7 @@ impl Session {
             hard_timeout: Instant::now() + Duration::from_secs(30 * 60),
             chunks_since_init: 0,
             exit_status: None,
+            is_direct_play,
         }
     }
 
