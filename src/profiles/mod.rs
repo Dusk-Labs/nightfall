@@ -94,6 +94,30 @@ pub fn get_profile_for(
     profiles
 }
 
+pub fn get_profile_for_with_type(
+    log: &slog::Logger,
+    stream_type: StreamType,
+    profile_type: ProfileType,
+    ctx: &ProfileContext,
+) -> Vec<&'static dyn TranscodingProfile> {
+    let mut profiles: Vec<_> = PROFILES
+        .get()
+        .expect("nightfall::PROFILES not initialized.")
+        .iter()
+        .filter(|x| x.profile_type() == profile_type && x.stream_type() == stream_type && if let Err(e) = x.supports(ctx) {
+            slog::debug!(log, "Profile not supported for ctx"; "profile" => x.name(), "reason" => e.to_string());
+            false
+        } else {
+            true
+        })
+        .map(AsRef::as_ref)
+        .collect();
+
+    profiles.sort_by_key(|x| x.profile_type());
+
+    profiles
+}
+
 pub trait TranscodingProfile: Debug + Send + Sync + 'static {
     /// Function must return what kind of profile it is.
     fn profile_type(&self) -> ProfileType;
