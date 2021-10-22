@@ -121,12 +121,24 @@ impl StateManager {
             self.logger,
             "New session {} map {} -> {}", &session_id, profile_args.input_ctx.stream, tag
         );
-        info!(self.logger, "Session {} chain {}", &session_id, chain);
 
         profile_args.output_ctx.outdir = format!("{}/{}", &self.outdir, session_id);
         profile_args.ffmpeg_bin = self.ffmpeg.clone();
 
-        let new_session = Session::new(session_id.clone(), profile_chain, profile_args);
+        let is_direct_play = profile_chain
+            .first()
+            .map(|x| x.profile_type() == ProfileType::Transmux)
+            .unwrap_or(false)
+            && profile_chain.len() == 1;
+
+        info!(self.logger, "Session {} chain {}", &session_id, chain; "direct_play" => is_direct_play);
+
+        let new_session = Session::new(
+            session_id.clone(),
+            profile_chain,
+            profile_args,
+            is_direct_play,
+        );
 
         self.sessions.insert(session_id.clone(), new_session);
 
@@ -212,7 +224,9 @@ impl StateManager {
 
             session.cont();
 
-            if should_hard_seek {
+            // NOTE: we dont want to allow hard seeks on direct play streams because we cannot patch
+            // their DTS if theres b_frames.
+            if should_hard_seek && !session.is_direct_play {
                 session.join().await;
                 session.reset_to(chunk);
                 let _ = session.start().await;
@@ -238,31 +252,33 @@ impl StateManager {
                 session.cont();
             }
 
-            match patch_segment(log, path, real_segment).await {
-                Ok(seq) => session.real_segment = seq,
-                // Sometimes we get partial chunks, when playback goes linearly (no hard seeks have
-                // occured) we can ignore this, but when the user seeks, the player doesnt query
-                // `init.mp4` again, so we have to move the video data from `init.mp4` into
-                // `N.m4s`.
-                Err(NightfallError::PartialSegment(_)) => {
-                    if session.chunks_since_init >= 1 {
-                        debug!(self.logger, "Got a partial segment, patching because the user has most likely seeked.");
-                        match patch_init_segment(
-                            self.logger.clone(),
-                            session.init_seg(),
-                            chunk_path.clone(),
-                            real_segment,
-                        )
-                        .await
-                        {
-                            Ok(seq) => session.real_segment = seq,
-                            Err(e) => {
-                                warn!(self.logger, "Failed to patch init segment."; "error" => e.to_string())
-                            }
+            if !session.is_direct_play {
+                match patch_segment(log, path, real_segment).await {
+                    Ok(seq) => session.real_segment = seq,
+                    // Sometimes we get partial chunks, when playback goes linearly (no hard seeks have
+                    // occured) we can ignore this, but when the user seeks, the player doesnt query
+                    // `init.mp4` again, so we have to move the video data from `init.mp4` into
+                    // `N.m4s`.
+                    Err(NightfallError::PartialSegment(_)) => {
+                        if session.chunks_since_init >= 1 {
+                            debug!(self.logger, "Got a partial segment, patching because the user has most likely seeked.");
+                            match patch_init_segment(
+                                self.logger.clone(),
+                                session.init_seg(),
+                                chunk_path.clone(),
+                                real_segment,
+                            )
+                                .await
+                                {
+                                    Ok(seq) => session.real_segment = seq,
+                                    Err(e) => {
+                                        warn!(self.logger, "Failed to patch init segment."; "error" => e.to_string())
+                                    }
+                                }
                         }
                     }
+                    Err(e) => warn!(self.logger, "Failed to patch segment."; "error" => e.to_string()),
                 }
-                Err(e) => warn!(self.logger, "Failed to patch segment."; "error" => e.to_string()),
             }
 
             session.reset_timeout(chunk);
@@ -287,9 +303,10 @@ impl StateManager {
             .sessions
             .get_mut(&id)
             .ok_or(NightfallError::SessionDoesntExist)?;
+
         let stats = self.stream_stats.entry(id).or_default();
 
-        if !session.has_started() {
+        if !session.has_started() || session.is_direct_play{
             return Ok(false);
         }
         // if we are seeking backwards we always want to restart the stream
@@ -367,7 +384,7 @@ impl StateManager {
     async fn garbage_collect(&mut self) -> Result<()> {
         #[allow(clippy::ptr_arg)]
         fn collect((_, session): &(&String, &Session)) -> bool {
-            session.is_hard_timeout()
+            session.is_hard_timeout() && !session.is_direct_play
         }
 
         // we want to check whether any session's ffmpeg process has died unexpectedly.
@@ -403,7 +420,7 @@ impl StateManager {
 
         let mut cnt = 0;
         for (_, v) in self.sessions.iter_mut() {
-            if v.is_timeout() && !v.paused && !v.try_wait() {
+            if v.is_timeout() && !v.paused && !v.try_wait() && !v.is_direct_play {
                 v.pause();
                 cnt += 1;
             }
