@@ -27,8 +27,6 @@ use tokio::task::JoinHandle;
 use tokio_stream::wrappers::LinesStream;
 use tokio_stream::StreamExt;
 
-/// Length of a chunk in seconds.
-pub const CHUNK_SIZE: u32 = 5;
 /// Represents how many chunks we encode before we require a timeout reset.
 /// Basically if within MAX_CHUNKS_AHEAD we do not get a timeout reset we kill the stream.
 /// This can be tuned
@@ -59,6 +57,7 @@ pub struct Session {
     /// How many chunks have we returned so far since init.mp4 was returned.
     pub chunks_since_init: u32,
     pub is_direct_play: bool,
+    pub chunk_size: u32,
 }
 
 impl Session {
@@ -74,6 +73,7 @@ impl Session {
             profile,
             profile_chain,
             real_segment: profile_ctx.output_ctx.start_num,
+            chunk_size: profile_ctx.output_ctx.target_gop,
             profile_ctx,
             last_chunk: 0,
             _process: None,
@@ -247,9 +247,9 @@ impl Session {
         } as u32;
 
         match self.profile.stream_type() {
-            StreamType::Audio { .. } => (frame / (CHUNK_SIZE * 24)).max(self.last_chunk),
+            StreamType::Audio { .. } => (frame / (self.chunk_size * 24)).max(self.last_chunk),
             StreamType::Video { .. } => {
-                frame / (CHUNK_SIZE * 24) + self.profile_ctx.output_ctx.start_num
+                frame / (self.chunk_size * 24) + self.profile_ctx.output_ctx.start_num
             }
             _ => 0,
         }
@@ -264,7 +264,7 @@ impl Session {
 
     // returns how many chunks per second
     pub fn speed(&self) -> f64 {
-        self.raw_speed().floor().max(20.0) / CHUNK_SIZE as f64
+        self.raw_speed().floor().max(20.0) / self.chunk_size as f64
     }
 
     pub fn eta_for(&self, chunk: u32) -> Duration {

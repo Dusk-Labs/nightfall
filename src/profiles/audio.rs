@@ -4,7 +4,6 @@ use super::StreamType;
 use super::TranscodingProfile;
 
 use crate::error::NightfallError;
-use crate::session::CHUNK_SIZE;
 
 #[derive(Debug)]
 pub struct AacTranscodeProfile;
@@ -33,7 +32,7 @@ impl TranscodingProfile for AacTranscodeProfile {
         let mut args = vec![
             "-y".into(),
             "-ss".into(),
-            (ctx.output_ctx.start_num * CHUNK_SIZE).to_string(),
+            (ctx.output_ctx.start_num * ctx.output_ctx.target_gop).to_string(),
             "-i".into(),
             ctx.file,
             "-copyts".into(),
@@ -85,9 +84,9 @@ impl TranscodingProfile for AacTranscodeProfile {
 
         args.append(&mut vec![
             "-hls_time".into(),
-            "5".into(),
+            ctx.output_ctx.target_gop.to_string(),
             "-force_key_frames".into(),
-            "expr:if(isnan(prev_forced_t),eq(t,t),gte(t,prev_forced_t+5.00))".into(),
+            format!("expr:gte(t,n_forced*{})", ctx.output_ctx.target_gop),
         ]);
 
         args.append(&mut vec!["-hls_segment_type".into(), "1".into()]);

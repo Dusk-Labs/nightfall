@@ -3,7 +3,6 @@ use super::ProfileType;
 use super::StreamType;
 use super::TranscodingProfile;
 
-use crate::session::CHUNK_SIZE;
 use crate::NightfallError;
 
 /// Cuda(NVENC/NVDEC) transcoding profiles.
@@ -49,7 +48,7 @@ impl TranscodingProfile for CudaTranscodeProfile {
             "cuda".into(),
             "-y".into(),
             "-ss".into(),
-            (ctx.output_ctx.start_num * CHUNK_SIZE).to_string(),
+            (ctx.output_ctx.start_num * ctx.output_ctx.target_gop).to_string(),
             "-i".into(),
             ctx.file,
             "-copyts".into(),
@@ -117,11 +116,11 @@ impl TranscodingProfile for CudaTranscodeProfile {
         // discontinuity issues that browsers seem to not ignore like mpv.
         args.append(&mut vec!["-hls_fmp4_init_filename".into(), init_seg]);
 
-        args.append(&mut vec!["-hls_time".into(), "5".into()]);
+        args.append(&mut vec!["-hls_time".into(), ctx.output_ctx.target_gop.to_string()]);
 
         args.append(&mut vec![
             "-force_key_frames".into(),
-            "expr:gte(t,n_forced*5.00)".into(),
+            format!("expr:gte(t,n_forced*{})", ctx.output_ctx.target_gop),
         ]);
 
         args.append(&mut vec!["-hls_segment_type".into(), 1.to_string()]);

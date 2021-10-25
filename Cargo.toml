@@ -1,6 +1,6 @@
 [package]
 name = "nightfall"
-version = "0.3.11-rc1"
+version = "0.3.11-rc2"
 authors = ["Valerian G. <valerian.garleanu@pm.me>"]
 edition = "2018"
 license = "GPL-2.0"

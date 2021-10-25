@@ -202,6 +202,7 @@ pub struct OutputCtx {
     pub height: Option<i64>,
     pub width: Option<i64>,
     pub audio_channels: u64,
+    pub target_gop: u32
 }
 
 impl Default for OutputCtx {
@@ -215,6 +216,7 @@ impl Default for OutputCtx {
             height: None,
             width: None,
             audio_channels: 2,
+            target_gop: 5,
         }
     }
 }
