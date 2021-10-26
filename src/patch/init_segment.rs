@@ -12,7 +12,7 @@ use crate::Result;
 use tokio::task::spawn_blocking;
 
 use mp4::mp4box::*;
-use slog::warn;
+use tracing::warn;
 
 #[derive(Default)]
 pub struct InitSegment {
@@ -24,11 +24,7 @@ pub struct InitSegment {
 }
 
 impl InitSegment {
-    pub fn from_reader(
-        mut reader: impl BufRead + Seek,
-        size: u64,
-        log: slog::Logger,
-    ) -> Result<Self> {
+    pub fn from_reader(mut reader: impl BufRead + Seek, size: u64) -> Result<Self> {
         let mut segment = Self::default();
         let start = reader.seek(SeekFrom::Current(0))?;
 
@@ -69,7 +65,7 @@ impl InitSegment {
                     current_segment.styp = Some(FtypBox::read_box(&mut reader, s)?);
                 }
                 b => {
-                    warn!(log, "Got a weird box type."; "box_type" => b.to_string());
+                    warn!(box_type = %b, "Got a weird box type.");
                     BoxHeader { name: b, size: s }.write(&mut segment.moov)?;
                     let mut boks = vec![0; (s - 8) as usize];
                     reader.read_exact(boks.as_mut_slice())?;
@@ -113,7 +109,6 @@ impl InitSegment {
 /// * `segment` - Path to the segment
 /// * `seq` - starting sequence number
 pub async fn patch_init_segment(
-    log: slog::Logger,
     init: impl AsRef<Path> + Send + 'static,
     segment_path: impl AsRef<Path> + Send + 'static,
     mut seq: u32,
@@ -123,7 +118,7 @@ pub async fn patch_init_segment(
         let size = f.metadata()?.len();
         let mut reader = BufReader::new(f);
 
-        let mut segment = InitSegment::from_reader(&mut reader, size, log.clone())?;
+        let mut segment = InitSegment::from_reader(&mut reader, size)?;
 
         let mut f = File::create(&segment_path)?;
         while let Some(segment) = segment.segments.pop_front() {

@@ -74,7 +74,10 @@ impl TranscodingProfile for H264TransmuxProfile {
         // discontinuity issues that browsers seem to not ignore like mpv.
         args.append(&mut vec!["-hls_fmp4_init_filename".into(), init_seg]);
 
-        args.append(&mut vec!["-hls_time".into(), ctx.output_ctx.target_gop.to_string()]);
+        args.append(&mut vec![
+            "-hls_time".into(),
+            ctx.output_ctx.target_gop.to_string(),
+        ]);
 
         args.append(&mut vec![
             "-force_key_frames".into(),
@@ -206,7 +209,10 @@ impl TranscodingProfile for H264TranscodeProfile {
         // Basically on the web seeking works by reloading the entire video because of
         // discontinuity issues that browsers seem to not ignore like mpv.
         args.append(&mut vec!["-hls_fmp4_init_filename".into(), init_seg]);
-        args.append(&mut vec!["-hls_time".into(), ctx.output_ctx.target_gop.to_string()]);
+        args.append(&mut vec![
+            "-hls_time".into(),
+            ctx.output_ctx.target_gop.to_string(),
+        ]);
         args.append(&mut vec![
             "-force_key_frames".into(),
             format!("expr:gte(t,n_forced*{})", ctx.output_ctx.target_gop),
