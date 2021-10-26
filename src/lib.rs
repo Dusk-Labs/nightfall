@@ -22,6 +22,7 @@ use crate::session::Session;
 use std::collections::HashMap;
 use std::time::Duration;
 use std::time::Instant;
+use std::fmt;
 
 use async_trait::async_trait;
 use xtra_proc::actor;
@@ -62,6 +63,17 @@ pub struct StateManager {
     pub exit_statuses: HashMap<String, String>,
     /// Logger
     pub logger: slog::Logger,
+}
+
+impl fmt::Debug for __ActorStateManager::StateManager {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("StateManager")
+            .field("outdir", &self.outdir)
+            .field("ffmpeg", &self.ffmpeg)
+            .field("sessions", &self.sessions)
+            .field("exit_statuses", &self.exit_statuses)
+            .finish()
+    }
 }
 
 #[actor]
