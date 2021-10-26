@@ -283,7 +283,7 @@ impl StateManager {
                                 Ok(seq) => session.real_segment = seq,
                                 Err(e) => {
                                     warn!(
-                                        error = %e.to_string().as_str(),
+                                        error = %e,
                                         "Failed to patch init segment."
                                     )
                                 }
@@ -291,7 +291,7 @@ impl StateManager {
                         }
                     }
                     Err(e) => {
-                        warn!(error = %e.to_string().as_str(), "Failed to patch segment.")
+                        warn!(error = %e, "Failed to patch segment.")
                     }
                 }
             }

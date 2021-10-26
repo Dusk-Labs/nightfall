@@ -58,7 +58,7 @@ pub fn profiles_init(_ffmpeg_bin: String) {
                 if let Err(e) = x.is_enabled() {
                     warn!(
                         profile = x.name(),
-                        reason = %e.to_string().as_str(),
+                        reason = %e,
                         "Disabling profile"
                     );
 
@@ -95,7 +95,7 @@ pub fn get_profile_for(
                 && if let Err(e) = x.supports(ctx) {
                     debug!(
                         profile = x.name(),
-                        reason = %e.to_string().as_str(),
+                        reason = %e,
                         "Profile not supported for ctx"
                     );
 
@@ -127,7 +127,7 @@ pub fn get_profile_for_with_type(
                 && if let Err(e) = x.supports(ctx) {
                     debug!(
                         profile = x.name(),
-                        reason = %e.to_string().as_str(),
+                        reason = %e,
                         "Profile not supported for ctx"
                     );
 

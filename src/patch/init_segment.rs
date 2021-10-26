@@ -65,7 +65,7 @@ impl InitSegment {
                     current_segment.styp = Some(FtypBox::read_box(&mut reader, s)?);
                 }
                 b => {
-                    warn!(box_type = %b.to_string().as_str(), "Got a weird box type.");
+                    warn!(box_type = %b, "Got a weird box type.");
                     BoxHeader { name: b, size: s }.write(&mut segment.moov)?;
                     let mut boks = vec![0; (s - 8) as usize];
                     reader.read_exact(boks.as_mut_slice())?;
