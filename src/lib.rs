@@ -102,8 +102,8 @@ impl StateManager {
             x.tag()
         } else {
             tracing::error!(
-                "Supplied profile chain is empty {}",
-                profile = format!("{:?}", profile_args)
+                profile = &*format!("{:?}", profile_args),
+                "Supplied profile chain is empty"
             );
 
             return Err(NightfallError::ProfileChainExhausted);
@@ -149,10 +149,8 @@ impl StateManager {
             && profile_chain.len() == 1;
 
         info!(
-            "Session {} chain {} {}",
-            &session_id,
-            chain,
-            direct_play = is_direct_play
+            direct_play = is_direct_play,
+            "Session {} chain {}", &session_id, chain
         );
 
         let new_session = Session::new(
@@ -287,13 +285,16 @@ impl StateManager {
                             {
                                 Ok(seq) => session.real_segment = seq,
                                 Err(e) => {
-                                    warn!("Failed to patch init segment. {}", error = e.to_string())
+                                    warn!(
+                                        error = e.to_string().as_str(),
+                                        "Failed to patch init segment."
+                                    )
                                 }
                             }
                         }
                     }
                     Err(e) => {
-                        warn!("Failed to patch segment. {}", error = e.to_string())
+                        warn!(error = e.to_string().as_str(), "Failed to patch segment.")
                     }
                 }
             }

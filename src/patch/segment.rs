@@ -70,7 +70,7 @@ impl Segment {
                     segment.styp = Some(styp);
                 }
                 b => {
-                    debug!("Got a weird box type. {}", box_type = b.to_string());
+                    debug!(box_type = b.to_string().as_str(), "Got a weird box type.");
                     skip_box(&mut reader, s)?;
                 }
             }

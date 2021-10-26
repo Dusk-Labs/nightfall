@@ -57,14 +57,14 @@ pub fn profiles_init(_ffmpeg_bin: String) {
             .filter(|x| {
                 if let Err(e) = x.is_enabled() {
                     warn!(
-                        "Disabling profile {}/{}",
                         profile = x.name(),
-                        reason = e.to_string()
+                        reason = e.to_string().as_str(),
+                        "Disabling profile"
                     );
 
                     false
                 } else {
-                    info!("Enabling profile {}", profile = x.name());
+                    info!(profile = x.name(), "Enabling profile");
 
                     true
                 }
@@ -94,9 +94,9 @@ pub fn get_profile_for(
             x.stream_type() == stream_type
                 && if let Err(e) = x.supports(ctx) {
                     debug!(
-                        "Profile not supported for ctx {}/{}",
                         profile = x.name(),
-                        reason = e.to_string()
+                        reason = e.to_string().as_str(),
+                        "Profile not supported for ctx"
                     );
 
                     false
@@ -126,9 +126,9 @@ pub fn get_profile_for_with_type(
                 && x.stream_type() == stream_type
                 && if let Err(e) = x.supports(ctx) {
                     debug!(
-                        "Profile not supported for ctx {}/{}",
                         profile = x.name(),
-                        reason = e.to_string()
+                        reason = e.to_string().as_str(),
+                        "Profile not supported for ctx"
                     );
 
                     false
