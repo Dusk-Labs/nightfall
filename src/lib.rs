@@ -76,6 +76,13 @@ impl fmt::Debug for __ActorStateManager::StateManager {
     }
 }
 
+impl fmt::Debug for StateManager {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("StateManagerActor")
+            .finish()
+    }
+}
+
 #[actor]
 impl StateManager {
     pub fn new(outdir: String, ffmpeg: String, logger: slog::Logger) -> Self {
