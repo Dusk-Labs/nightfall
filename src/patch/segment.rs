@@ -9,10 +9,10 @@ use std::path::Path;
 use crate::NightfallError;
 use crate::Result;
 
-use slog::debug;
 use tokio::task::spawn_blocking;
 
 use mp4::mp4box::*;
+use tracing::debug;
 
 /// Struct represents an individual segment from a stream.
 #[derive(Clone, Default, Debug)]
@@ -39,11 +39,7 @@ impl Segment {
         );
     }
 
-    pub fn from_reader(
-        mut reader: impl BufRead + Seek,
-        size: u64,
-        log: slog::Logger,
-    ) -> Result<(Self, u64)> {
+    pub fn from_reader(mut reader: impl BufRead + Seek, size: u64) -> Result<(Self, u64)> {
         let start = reader.seek(SeekFrom::Current(0))?;
 
         let mut current = start;
@@ -74,7 +70,7 @@ impl Segment {
                     segment.styp = Some(styp);
                 }
                 b => {
-                    debug!(log, "Got a weird box type."; "box_type" => b.to_string());
+                    debug!("Got a weird box type. {}", box_type = b.to_string());
                     skip_box(&mut reader, s)?;
                 }
             }
@@ -166,11 +162,7 @@ impl Segment {
 ///
 /// # Returns
 /// This function will return the index of the current segment.
-pub async fn patch_segment(
-    log: slog::Logger,
-    file: impl AsRef<Path> + Send + 'static,
-    mut seq: u32,
-) -> Result<u32> {
+pub async fn patch_segment(file: impl AsRef<Path> + Send + 'static, mut seq: u32) -> Result<u32> {
     spawn_blocking(move || {
         let f = File::open(&file)?;
         let size = f.metadata()?.len();
@@ -180,7 +172,7 @@ pub async fn patch_segment(
         let mut current = reader.seek(SeekFrom::Current(0))?;
 
         while current < size {
-            let (segment, new_position) = Segment::from_reader(&mut reader, size, log.clone())?;
+            let (segment, new_position) = Segment::from_reader(&mut reader, size)?;
             segments.push_back(segment);
             current = new_position;
         }

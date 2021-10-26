@@ -16,6 +16,9 @@ pub use cuda::CudaTranscodeProfile;
 #[cfg(feature = "ssa_transmux")]
 pub use subtitle::AssExtractProfile;
 pub use subtitle::WebvttTranscodeProfile;
+use tracing::debug;
+use tracing::info;
+use tracing::warn;
 #[cfg(all(unix, feature = "vaapi"))]
 pub use vaapi::VaapiTranscodeProfile;
 pub use video::H264TranscodeProfile;
@@ -29,7 +32,7 @@ use once_cell::sync::OnceCell;
 
 static PROFILES: OnceCell<Vec<Box<dyn TranscodingProfile>>> = OnceCell::new();
 
-pub fn profiles_init(log: slog::Logger, _ffmpeg_bin: String) {
+pub fn profiles_init(_ffmpeg_bin: String) {
     let profiles: Vec<Option<Box<dyn TranscodingProfile>>> = vec![
         Some(Box::new(AacTranscodeProfile)),
         Some(Box::new(H264TranscodeProfile)),
@@ -51,12 +54,20 @@ pub fn profiles_init(log: slog::Logger, _ffmpeg_bin: String) {
     let _ = PROFILES.set(
         profiles
             .into_iter()
-            .filter(|x| if let Err(e) = x.is_enabled() {
-                slog::warn!(&log, "Disabling profile"; "profile" => x.name(), "reason" => e.to_string());
-                false
-            } else {
-                slog::info!(&log, "Enabling profile"; "profile" => x.name());
-                true
+            .filter(|x| {
+                if let Err(e) = x.is_enabled() {
+                    warn!(
+                        "Disabling profile {}/{}",
+                        profile = x.name(),
+                        reason = e.to_string()
+                    );
+
+                    false
+                } else {
+                    info!("Enabling profile {}", profile = x.name());
+
+                    true
+                }
             })
             .collect(),
     );
@@ -72,7 +83,6 @@ pub fn get_active_profiles() -> Vec<&'static dyn TranscodingProfile> {
 }
 
 pub fn get_profile_for(
-    log: &slog::Logger,
     stream_type: StreamType,
     ctx: &ProfileContext,
 ) -> Vec<&'static dyn TranscodingProfile> {
@@ -80,11 +90,19 @@ pub fn get_profile_for(
         .get()
         .expect("nightfall::PROFILES not initialized.")
         .iter()
-        .filter(|x| x.stream_type() == stream_type && if let Err(e) = x.supports(ctx) {
-            slog::debug!(log, "Profile not supported for ctx"; "profile" => x.name(), "reason" => e.to_string());
-            false
-        } else {
-            true
+        .filter(|x| {
+            x.stream_type() == stream_type
+                && if let Err(e) = x.supports(ctx) {
+                    debug!(
+                        "Profile not supported for ctx {}/{}",
+                        profile = x.name(),
+                        reason = e.to_string()
+                    );
+
+                    false
+                } else {
+                    true
+                }
         })
         .map(AsRef::as_ref)
         .collect();
@@ -95,7 +113,6 @@ pub fn get_profile_for(
 }
 
 pub fn get_profile_for_with_type(
-    log: &slog::Logger,
     stream_type: StreamType,
     profile_type: ProfileType,
     ctx: &ProfileContext,
@@ -104,11 +121,20 @@ pub fn get_profile_for_with_type(
         .get()
         .expect("nightfall::PROFILES not initialized.")
         .iter()
-        .filter(|x| x.profile_type() == profile_type && x.stream_type() == stream_type && if let Err(e) = x.supports(ctx) {
-            slog::debug!(log, "Profile not supported for ctx"; "profile" => x.name(), "reason" => e.to_string());
-            false
-        } else {
-            true
+        .filter(|x| {
+            x.profile_type() == profile_type
+                && x.stream_type() == stream_type
+                && if let Err(e) = x.supports(ctx) {
+                    debug!(
+                        "Profile not supported for ctx {}/{}",
+                        profile = x.name(),
+                        reason = e.to_string()
+                    );
+
+                    false
+                } else {
+                    true
+                }
         })
         .map(AsRef::as_ref)
         .collect();
@@ -202,7 +228,7 @@ pub struct OutputCtx {
     pub height: Option<i64>,
     pub width: Option<i64>,
     pub audio_channels: u64,
-    pub target_gop: u32
+    pub target_gop: u32,
 }
 
 impl Default for OutputCtx {

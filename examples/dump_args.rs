@@ -8,10 +8,7 @@ fn main() {
     let profile = args.next().expect("Usage: dump_args <profile> <file>");
     let file = args.next().expect("Usage: dump_args <profile> <file>");
 
-    let drain = slog::Discard;
-    let log = slog::Logger::root(drain, slog::o!());
-
-    profiles_init(log, "/usr/bin/ffmpeg".to_string());
+    profiles_init("/usr/bin/ffmpeg".to_string());
 
     let profile = get_active_profiles()
         .into_iter()

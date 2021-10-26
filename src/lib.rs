@@ -20,18 +20,16 @@ use crate::profiles::*;
 use crate::session::Session;
 
 use std::collections::HashMap;
+use std::fmt;
 use std::time::Duration;
 use std::time::Instant;
-use std::fmt;
 
 use async_trait::async_trait;
+use tracing::debug;
+use tracing::info;
+use tracing::warn;
 use xtra_proc::actor;
 use xtra_proc::handler;
-
-use slog::debug;
-use slog::error;
-use slog::info;
-use slog::warn;
 
 pub use tokio::process::ChildStdout;
 
@@ -61,8 +59,6 @@ pub struct StateManager {
     pub stream_stats: HashMap<String, StreamStat>,
     /// Contains the exit status of dead sessions
     pub exit_statuses: HashMap<String, String>,
-    /// Logger
-    pub logger: slog::Logger,
 }
 
 impl fmt::Debug for __ActorStateManager::StateManager {
@@ -78,18 +74,16 @@ impl fmt::Debug for __ActorStateManager::StateManager {
 
 impl fmt::Debug for StateManager {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("StateManagerActor")
-            .finish()
+        f.debug_struct("StateManagerActor").finish()
     }
 }
 
 #[actor]
 impl StateManager {
-    pub fn new(outdir: String, ffmpeg: String, logger: slog::Logger) -> Self {
+    pub fn new(outdir: String, ffmpeg: String) -> Self {
         Self {
             outdir,
             ffmpeg,
-            logger,
             sessions: HashMap::new(),
             stream_stats: HashMap::new(),
             exit_statuses: HashMap::new(),
@@ -107,7 +101,11 @@ impl StateManager {
         let first_tag = if let Some(x) = profile_chain.first() {
             x.tag()
         } else {
-            error!(self.logger, "Supplied profile chain is empty"; "profile" => format!("{:?}", profile_args));
+            tracing::error!(
+                "Supplied profile chain is empty {}",
+                profile = format!("{:?}", profile_args)
+            );
+
             return Err(NightfallError::ProfileChainExhausted);
         };
 
@@ -137,8 +135,8 @@ impl StateManager {
         };
 
         info!(
-            self.logger,
-            "New session {} map {} -> {}", &session_id, profile_args.input_ctx.stream, tag
+            "New session {} map {} -> {}",
+            &session_id, profile_args.input_ctx.stream, tag
         );
 
         profile_args.output_ctx.outdir = format!("{}/{}", &self.outdir, session_id);
@@ -150,7 +148,12 @@ impl StateManager {
             .unwrap_or(false)
             && profile_chain.len() == 1;
 
-        info!(self.logger, "Session {} chain {}", &session_id, chain; "direct_play" => is_direct_play);
+        info!(
+            "Session {} chain {} {}",
+            &session_id,
+            chain,
+            direct_play = is_direct_play
+        );
 
         let new_session = Session::new(
             session_id.clone(),
@@ -176,10 +179,7 @@ impl StateManager {
         if let Some(status) = session.exit_status.take() {
             if !status.success() {
                 if let Some(x) = session.next_profile() {
-                    info!(
-                        self.logger,
-                        "Session {} chunk={} trying profile {}", &id, chunk, x
-                    );
+                    info!("Session {} chunk={} trying profile {}", &id, chunk, x);
                     session.reset_to(session.start_num());
                 } else {
                     return Err(NightfallError::ProfileChainExhausted);
@@ -253,16 +253,12 @@ impl StateManager {
                 stats.last_hard_seek = Instant::now();
                 stats.hard_seeked_at = chunk;
 
-                debug!(
-                    self.logger,
-                    "Resetting {} to chunk {} because user seeked.", &id, chunk
-                );
+                debug!("Resetting {} to chunk {} because user seeked.", &id, chunk);
             }
 
             Err(NightfallError::ChunkNotDone)
         } else {
             let chunk_path = session.chunk_to_path(chunk);
-            let log = self.logger.clone();
             let path = chunk_path.clone();
             let real_segment = session.real_segment;
 
@@ -272,7 +268,7 @@ impl StateManager {
             }
 
             if !session.is_direct_play {
-                match patch_segment(log, path, real_segment).await {
+                match patch_segment(path, real_segment).await {
                     Ok(seq) => session.real_segment = seq,
                     // Sometimes we get partial chunks, when playback goes linearly (no hard seeks have
                     // occured) we can ignore this, but when the user seeks, the player doesnt query
@@ -280,23 +276,25 @@ impl StateManager {
                     // `N.m4s`.
                     Err(NightfallError::PartialSegment(_)) => {
                         if session.chunks_since_init >= 1 {
-                            debug!(self.logger, "Got a partial segment, patching because the user has most likely seeked.");
+                            debug!( "Got a partial segment, patching because the user has most likely seeked.");
+
                             match patch_init_segment(
-                                self.logger.clone(),
                                 session.init_seg(),
                                 chunk_path.clone(),
                                 real_segment,
                             )
-                                .await
-                                {
-                                    Ok(seq) => session.real_segment = seq,
-                                    Err(e) => {
-                                        warn!(self.logger, "Failed to patch init segment."; "error" => e.to_string())
-                                    }
+                            .await
+                            {
+                                Ok(seq) => session.real_segment = seq,
+                                Err(e) => {
+                                    warn!("Failed to patch init segment. {}", error = e.to_string())
                                 }
+                            }
                         }
                     }
-                    Err(e) => warn!(self.logger, "Failed to patch segment."; "error" => e.to_string()),
+                    Err(e) => {
+                        warn!("Failed to patch segment. {}", error = e.to_string())
+                    }
                 }
             }
 
@@ -325,7 +323,7 @@ impl StateManager {
 
         let stats = self.stream_stats.entry(id).or_default();
 
-        if !session.has_started() || session.is_direct_play{
+        if !session.has_started() || session.is_direct_play {
             return Ok(false);
         }
         // if we are seeking backwards we always want to restart the stream
@@ -356,7 +354,7 @@ impl StateManager {
             .sessions
             .get_mut(&id)
             .ok_or(NightfallError::SessionDoesntExist)?;
-        info!(self.logger, "Killing session {}", id);
+        info!("Killing session {}", id);
         session.join().await;
         session.set_timeout();
 
@@ -369,7 +367,7 @@ impl StateManager {
             .sessions
             .get_mut(&id)
             .ok_or(NightfallError::SessionDoesntExist)?;
-        info!(self.logger, "Killing session {}", id);
+        info!("Killing session {}", id);
         session.join().await;
 
         Ok(())
@@ -427,7 +425,7 @@ impl StateManager {
         };
 
         if !to_reap.is_empty() {
-            info!(self.logger, "Reaping {} streams", to_reap.len());
+            info!("Reaping {} streams", to_reap.len());
         }
 
         for (k, v) in to_reap.iter_mut() {
@@ -446,7 +444,7 @@ impl StateManager {
         }
 
         if cnt != 0 {
-            info!(self.logger, "Paused {} streams", cnt);
+            info!("Paused {} streams", cnt);
         }
 
         Ok(())
