@@ -101,10 +101,7 @@ impl StateManager {
         let first_tag = if let Some(x) = profile_chain.first() {
             x.tag()
         } else {
-            tracing::error!(
-                profile = &*format!("{:?}", profile_args),
-                "Supplied profile chain is empty"
-            );
+            tracing::error!(profile = ?profile_args, "Supplied profile chain is empty");
 
             return Err(NightfallError::ProfileChainExhausted);
         };
@@ -274,7 +271,7 @@ impl StateManager {
                     // `N.m4s`.
                     Err(NightfallError::PartialSegment(_)) => {
                         if session.chunks_since_init >= 1 {
-                            debug!( "Got a partial segment, patching because the user has most likely seeked.");
+                            debug!("Got a partial segment, patching because the user has most likely seeked.");
 
                             match patch_init_segment(
                                 session.init_seg(),
@@ -286,7 +283,7 @@ impl StateManager {
                                 Ok(seq) => session.real_segment = seq,
                                 Err(e) => {
                                     warn!(
-                                        error = e.to_string().as_str(),
+                                        error = %e.to_string().as_str(),
                                         "Failed to patch init segment."
                                     )
                                 }
@@ -294,7 +291,7 @@ impl StateManager {
                         }
                     }
                     Err(e) => {
-                        warn!(error = e.to_string().as_str(), "Failed to patch segment.")
+                        warn!(error = %e.to_string().as_str(), "Failed to patch segment.")
                     }
                 }
             }
