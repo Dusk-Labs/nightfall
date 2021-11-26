@@ -203,7 +203,7 @@ impl StateManager {
         if session.is_chunk_done(chunk) {
             // reset chunk since init counter
             session.chunks_since_init = 0;
-            return Ok(session.init_seg());
+            return Ok(session.custom_init_seg(chunk));
         }
 
         Err(NightfallError::ChunkNotDone)

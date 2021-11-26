@@ -329,6 +329,14 @@ impl Session {
         )
     }
 
+    pub fn custom_init_seg(&self, start_num: u32) -> String {
+        format!(
+            "{}/{}_init.mp4",
+            self.profile_ctx.output_ctx.outdir,
+            start_num
+        )
+    }
+
     pub fn has_started(&self) -> bool {
         self.has_started
     }
