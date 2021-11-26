@@ -262,7 +262,7 @@ impl StateManager {
                 session.cont();
             }
 
-            if !session.is_direct_play && session.profile_ctx.output_ctx.codec.as_str() != "aac" {
+            if !session.is_direct_play {
                 match patch_segment(path, real_segment).await {
                     Ok(seq) => session.real_segment = seq,
                     // Sometimes we get partial chunks, when playback goes linearly (no hard seeks have
