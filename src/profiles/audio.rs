@@ -54,9 +54,7 @@ impl TranscodingProfile for AacTranscodeProfile {
             "-vsync".into(),
             "-1".into(),
             "-avoid_negative_ts".into(),
-            "disabled".into(),
-            "-max_muxing_queue_size".into(),
-            "2048".into(),
+            "make_non_negative".into(),
         ]);
 
         args.append(&mut vec![

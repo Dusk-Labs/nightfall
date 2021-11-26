@@ -27,6 +27,8 @@ use tokio::task::JoinHandle;
 use tokio_stream::wrappers::LinesStream;
 use tokio_stream::StreamExt;
 
+use tracing::debug;
+
 /// Represents how many chunks we encode before we require a timeout reset.
 /// Basically if within MAX_CHUNKS_AHEAD we do not get a timeout reset we kill the stream.
 /// This can be tuned
@@ -45,19 +47,21 @@ pub struct Session {
 
     pub profile_chain: Vec<&'static dyn TranscodingProfile>,
     pub profile: &'static dyn TranscodingProfile,
-    profile_ctx: ProfileContext,
-    _process: Option<JoinHandle<()>>,
+    pub profile_ctx: ProfileContext,
     pub exit_status: Option<ExitStatus>,
-    has_started: bool,
-    last_chunk: u32,
-    hard_timeout: Instant,
-    child_pid: Option<u32>,
-    real_process: Option<Child>,
     pub real_segment: u32,
     /// How many chunks have we returned so far since init.mp4 was returned.
     pub chunks_since_init: u32,
     pub is_direct_play: bool,
     pub chunk_size: u32,
+
+    has_started: bool,
+    last_chunk: u32,
+    hard_timeout: Instant,
+    child_pid: Option<u32>,
+    real_process: Option<Child>,
+
+    _process: Option<JoinHandle<()>>,
 }
 
 impl Session {
@@ -122,6 +126,8 @@ impl Session {
             .spawn()?;
 
         self.child_pid = process.id();
+
+        debug!(pid = self.child_pid, ffmpeg = %self.profile_ctx.ffmpeg_bin, ?args, "Started ffmpeg");
 
         if !self.profile.is_stdio_stream() {
             if let Some(stdout) = process.stdout.take() {
