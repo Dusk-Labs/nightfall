@@ -75,6 +75,21 @@ impl TranscodingProfile for AacTranscodeProfile {
             "5000000".into(),
         ]);
 
+        // these args are needed if we start a new stream in the middle of a old one, such as when
+        // seeking. These args will reset the base decode ts to equal the earliest presentation
+        // timestamp.
+        if ctx.output_ctx.start_num > 0 {
+            args.append(&mut vec![
+                "-hls_ts_options".into(), 
+                "movflags=frag_custom+dash+delay_moov+frag_discont".into(),
+            ]);
+        } else {
+            args.append(&mut vec![
+                "-hls_ts_options".into(), 
+                "movflags=frag_custom+dash+delay_moov".into(),
+            ]);
+        }
+
         // args needed so we can distinguish between init fragments for new streams.
         // Basically on the web seeking works by reloading the entire video because of
         // discontinuity issues that browsers seem to not ignore like mpv.

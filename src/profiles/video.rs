@@ -33,7 +33,7 @@ impl TranscodingProfile for H264TransmuxProfile {
             "-ss".into(),
             (ctx.output_ctx.start_num * ctx.output_ctx.target_gop).to_string(),
             "-i".into(),
-            ctx.file,
+            ctx.file.clone(),
             "-copyts".into(),
             "-map".into(),
             stream,
@@ -78,6 +78,8 @@ impl TranscodingProfile for H264TransmuxProfile {
             "-hls_time".into(),
             ctx.output_ctx.target_gop.to_string(),
         ]);
+
+        args.append(&mut get_discont_flags(&ctx));
 
         args.append(&mut vec![
             "-force_key_frames".into(),
@@ -151,19 +153,14 @@ impl TranscodingProfile for H264TranscodeProfile {
             "-ss".into(),
             (ctx.output_ctx.start_num * ctx.output_ctx.target_gop).to_string(),
             "-i".into(),
-            ctx.file,
+            ctx.file.clone(),
             "-copyts".into(),
             "-map".into(),
             stream,
             "-c:0".into(),
             "libx264".into(),
             "-preset".into(),
-            "ultrafast".into(),
-            // FIXME: Basically atm when we patch the segments before returning to the user we
-            // modify DTS to be correct otherwise when seeking the player breaks on chrome. Now the
-            // issue is that when we have B-frames PTS != DTS so we must calculate it properly.
-            "-x264-params".into(),
-            "bframes=0".into(),
+            "veryfast".into(),
         ];
 
         if let Some(height) = ctx.output_ctx.height {
@@ -178,11 +175,10 @@ impl TranscodingProfile for H264TranscodeProfile {
         }
 
         args.append(&mut vec![
-            "-start_at_zero".into(),
             "-vsync".into(),
             "passthrough".into(),
             "-avoid_negative_ts".into(),
-            "disabled".into(),
+            "make_non_negative".into(),
             "-max_muxing_queue_size".into(),
             "2048".into(),
         ]);
@@ -193,6 +189,8 @@ impl TranscodingProfile for H264TranscodeProfile {
             "-start_number".into(),
             start_num,
         ]);
+
+        args.append(&mut get_discont_flags(&ctx));
 
         // needed so that in progress segments are named `tmp` and then renamed after the data is
         // on disk.
@@ -325,5 +323,22 @@ impl TranscodingProfile for RawVideoTranscodeProfile {
 
     fn is_stdio_stream(&self) -> bool {
         true
+    }
+}
+
+pub(super) fn get_discont_flags(ctx: &ProfileContext) -> Vec<String> {
+    // these args are needed if we start a new stream in the middle of a old one, such as when
+    // seeking. These args will reset the base decode ts to equal the earliest presentation
+    // timestamp.
+    if ctx.output_ctx.start_num > 0 {
+        vec![
+            "-hls_ts_options".into(), 
+            "movflags=frag_custom+dash+delay_moov+frag_discont".into(),
+        ]
+    } else {
+        vec![
+            "-hls_ts_options".into(), 
+            "movflags=frag_custom+dash+delay_moov".into(),
+        ]
     }
 }

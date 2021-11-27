@@ -50,7 +50,7 @@ impl TranscodingProfile for CudaTranscodeProfile {
             "-ss".into(),
             (ctx.output_ctx.start_num * ctx.output_ctx.target_gop).to_string(),
             "-i".into(),
-            ctx.file,
+            ctx.file.clone(),
             "-copyts".into(),
             "-map".into(),
             stream,
@@ -85,11 +85,9 @@ impl TranscodingProfile for CudaTranscodeProfile {
             "120".into(),
             "-frag_duration".into(),
             "5000000".into(),
-            "-movflags".into(),
-            "frag_keyframe".into(),
-            "-use_mfra_for".into(),
-            "pts".into(),
         ]);
+
+        args.append(&mut super::video::get_discont_flags(&ctx));
 
         args.append(&mut vec![
             "-f".into(),

@@ -192,7 +192,6 @@ pub async fn patch_segment(file: impl AsRef<Path> + Send + 'static, mut seq: u32
             // segment number.
             segment
                 .gen_styp()
-                .normalize_dts()
                 .set_segno(seq)
                 .write(&mut f)?;
 

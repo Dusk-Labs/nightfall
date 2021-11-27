@@ -238,9 +238,7 @@ impl StateManager {
 
             session.cont();
 
-            // NOTE: we dont want to allow hard seeks on direct play streams because we cannot patch
-            // their DTS if theres b_frames.
-            if should_hard_seek && !session.is_direct_play {
+            if should_hard_seek {
                 session.join().await;
                 session.reset_to(chunk);
                 let _ = session.start().await;
@@ -262,37 +260,35 @@ impl StateManager {
                 session.cont();
             }
 
-            if !session.is_direct_play {
-                match patch_segment(path, real_segment).await {
-                    Ok(seq) => session.real_segment = seq,
-                    // Sometimes we get partial chunks, when playback goes linearly (no hard seeks have
-                    // occured) we can ignore this, but when the user seeks, the player doesnt query
-                    // `init.mp4` again, so we have to move the video data from `init.mp4` into
-                    // `N.m4s`.
-                    Err(NightfallError::PartialSegment(_)) => {
-                        if session.chunks_since_init >= 1 {
-                            debug!("Got a partial segment, patching because the user has most likely seeked.");
+            match patch_segment(path, real_segment).await {
+                Ok(seq) => session.real_segment = seq,
+                // Sometimes we get partial chunks, when playback goes linearly (no hard seeks have
+                // occured) we can ignore this, but when the user seeks, the player doesnt query
+                // `init.mp4` again, so we have to move the video data from `init.mp4` into
+                // `N.m4s`.
+                Err(NightfallError::PartialSegment(_)) => {
+                    if session.chunks_since_init >= 1 {
+                        debug!("Got a partial segment, patching because the user has most likely seeked.");
 
-                            match patch_init_segment(
-                                session.init_seg(),
-                                chunk_path.clone(),
-                                real_segment,
+                match patch_init_segment(
+                    session.init_seg(),
+                    chunk_path.clone(),
+                    real_segment,
+                )
+                    .await
+                    {
+                        Ok(seq) => session.real_segment = seq,
+                        Err(e) => {
+                            warn!(
+                                error = %e,
+                                "Failed to patch init segment."
                             )
-                            .await
-                            {
-                                Ok(seq) => session.real_segment = seq,
-                                Err(e) => {
-                                    warn!(
-                                        error = %e,
-                                        "Failed to patch init segment."
-                                    )
-                                }
-                            }
                         }
                     }
-                    Err(e) => {
-                        warn!(error = %e, "Failed to patch segment.")
                     }
+                }
+                Err(e) => {
+                    warn!(error = %e, "Failed to patch segment.")
                 }
             }
 
@@ -321,7 +317,7 @@ impl StateManager {
 
         let stats = self.stream_stats.entry(id).or_default();
 
-        if !session.has_started() || session.is_direct_play {
+        if !session.has_started() {
             return Ok(false);
         }
         // if we are seeking backwards we always want to restart the stream
@@ -435,7 +431,7 @@ impl StateManager {
 
         let mut cnt = 0;
         for (_, v) in self.sessions.iter_mut() {
-            if v.is_timeout() && !v.paused && !v.try_wait() && !v.is_direct_play {
+            if v.is_timeout() && !v.paused && !v.try_wait() {
                 v.pause();
                 cnt += 1;
             }

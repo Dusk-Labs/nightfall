@@ -69,6 +69,8 @@ impl TranscodingProfile for AmfTranscodeProfile {
             "5000000".into(),
         ]);
 
+        args.append(&mut super::video::get_discont_flags(&ctx));
+
         // args needed so we can distinguish between init fragments for new streams.
         // Basically on the web seeking works by reloading the entire video because of
         // discontinuity issues that browsers seem to not ignore like mpv.
