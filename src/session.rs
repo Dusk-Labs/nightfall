@@ -34,6 +34,8 @@ use tracing::debug;
 /// This can be tuned
 const MAX_CHUNKS_AHEAD: u32 = 15;
 
+// FIXME: This lazy static should be removed in favour of adding a new stats field to a session and
+// sharing it between two threads at max rather than per whole lib.
 lazy_static::lazy_static! {
     /// This static contains stats about each stream. It is a Map of maps containing k/v pairs
     /// parsed from the ffmpeg stdout. Each Map is keyed by a session id.
@@ -72,6 +74,7 @@ impl Session {
         is_direct_play: bool,
     ) -> Self {
         let profile = profile_chain.pop().expect("Profile chain is empty.");
+
         Self {
             id,
             profile,
@@ -122,6 +125,7 @@ impl Session {
         let mut process = Command::new(self.profile_ctx.ffmpeg_bin.clone())
             .stdout(stdout)
             .stderr(stderr)
+            .stdin(Stdio::null())
             .args(args.as_slice())
             .spawn()?;
 
