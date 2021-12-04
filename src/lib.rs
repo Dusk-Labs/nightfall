@@ -139,14 +139,7 @@ impl StateManager {
         profile_args.output_ctx.outdir = format!("{}/{}", &self.outdir, session_id);
         profile_args.ffmpeg_bin = self.ffmpeg.clone();
 
-        let is_direct_play = profile_chain
-            .first()
-            .map(|x| x.profile_type() == ProfileType::Transmux)
-            .unwrap_or(false)
-            && profile_chain.len() == 1;
-
         info!(
-            direct_play = is_direct_play,
             "Session {} chain {}", &session_id, chain
         );
 
@@ -154,7 +147,6 @@ impl StateManager {
             session_id.clone(),
             profile_chain,
             profile_args,
-            is_direct_play,
         );
 
         self.sessions.insert(session_id.clone(), new_session);
@@ -395,7 +387,7 @@ impl StateManager {
     async fn garbage_collect(&mut self) -> Result<()> {
         #[allow(clippy::ptr_arg)]
         fn collect((_, session): &(&String, &Session)) -> bool {
-            session.is_hard_timeout() && !session.is_direct_play
+            session.is_hard_timeout()
         }
 
         // we want to check whether any session's ffmpeg process has died unexpectedly.

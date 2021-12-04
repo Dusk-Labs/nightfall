@@ -44,17 +44,23 @@ lazy_static::lazy_static! {
 }
 
 pub struct Session {
+    /// Id of a stream in the form of a UUID.
     pub id: String,
-    pub paused: bool,
-
+    /// Indicates whether this stream is currently being throttled or not.
+    pub is_throttled: bool,
+    /// A list of fallback transcoding profiles. Nightfall will start using profiles from here if
+    /// the first profile fails.
     pub profile_chain: Vec<&'static dyn TranscodingProfile>,
+    /// The current transcoding profile being used in this session.
     pub profile: &'static dyn TranscodingProfile,
+    /// The profile context for this session. This struct contains important information like
+    /// target bitrate and container.
     pub profile_ctx: ProfileContext,
+    /// The exit status of the underlying ffmpeg process.
     pub exit_status: Option<ExitStatus>,
     pub real_segment: u32,
     /// How many chunks have we returned so far since init.mp4 was returned.
     pub chunks_since_init: u32,
-    pub is_direct_play: bool,
     pub chunk_size: u32,
 
     has_started: bool,
@@ -71,7 +77,6 @@ impl Session {
         id: String,
         mut profile_chain: Vec<&'static dyn TranscodingProfile>,
         profile_ctx: ProfileContext,
-        is_direct_play: bool,
     ) -> Self {
         let profile = profile_chain.pop().expect("Profile chain is empty.");
 
@@ -84,21 +89,20 @@ impl Session {
             profile_ctx,
             last_chunk: 0,
             _process: None,
-            paused: false,
+            is_throttled: false,
             has_started: false,
             child_pid: None,
             real_process: None,
             hard_timeout: Instant::now() + Duration::from_secs(30 * 60),
             chunks_since_init: 0,
             exit_status: None,
-            is_direct_play,
         }
     }
 
     pub async fn start(&mut self) -> Result<(), io::Error> {
         // make sure we actually have a path to write files to.
         self.has_started = true;
-        self.paused = false;
+        self.is_throttled = false;
 
         let args = self.profile.build(self.profile_ctx.clone()).unwrap();
 
@@ -218,18 +222,18 @@ impl Session {
 
     pub fn pause(&mut self) {
         if let Some(x) = self.child_pid {
-            if !self.paused {
+            if !self.is_throttled {
                 crate::utils::pause_proc(x as i32);
-                self.paused = true;
+                self.is_throttled = true;
             }
         }
     }
 
     pub fn cont(&mut self) {
         if let Some(x) = self.child_pid {
-            if self.paused {
+            if self.is_throttled {
                 crate::utils::cont_proc(x as i32);
-                self.paused = false;
+                self.is_throttled = false;
             }
         }
     }
@@ -350,7 +354,7 @@ impl Session {
         self._process = None;
         self.last_chunk = chunk;
         self.has_started = false;
-        self.paused = true;
+        self.is_throttled = true;
         self.real_segment = chunk;
         self.child_pid = None;
     }
