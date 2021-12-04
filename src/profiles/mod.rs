@@ -194,6 +194,7 @@ pub struct ProfileContext {
 #[derive(Clone, Debug)]
 pub struct InputCtx {
     pub stream: usize,
+    pub audio_channels: u64,
     pub codec: String,
     pub pix_fmt: String,
     pub profile: String,
@@ -208,6 +209,7 @@ impl Default for InputCtx {
         Self {
             stream: 0,
             codec: String::new(),
+            audio_channels: 2,
             pix_fmt: String::new(),
             profile: String::new(),
             bframes: None,

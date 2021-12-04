@@ -423,7 +423,7 @@ impl StateManager {
 
         let mut cnt = 0;
         for (_, v) in self.sessions.iter_mut() {
-            if v.is_timeout() && !v.paused && !v.try_wait() {
+            if v.is_timeout() && !v.is_throttled && !v.try_wait() {
                 v.pause();
                 cnt += 1;
             }

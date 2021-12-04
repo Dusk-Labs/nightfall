@@ -40,11 +40,15 @@ impl TranscodingProfile for AacTranscodeProfile {
             stream,
             "-c:0".into(),
             "aac".into(),
-            "-ac".into(),
         ];
 
-        let ac = ctx.output_ctx.audio_channels.to_string();
-        args.push(ac);
+        if ctx.input_ctx.audio_channels != ctx.output_ctx.audio_channels {
+            args.append(&mut vec![
+                "-af".into(),
+                "pan=stereo|FL=0.5*FC+0.707*FL+0.707*BL+0.5*LFE|FR=0.5*FC+0.707*FR+0.707*BR+0.5*LFE".into(),
+            ]);
+        }
+
         let ab = ctx.output_ctx.bitrate.unwrap_or(120_000).to_string();
         args.push("-ab".into());
         args.push(ab);
