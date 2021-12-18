@@ -92,7 +92,7 @@ impl TranscodingProfile for AssExtractProfile {
     }
 
     fn supports(&self, ctx: &ProfileContext) -> Result<(), NightfallError> {
-        if ctx.input_ctx.codec.as_str() == "ass" && ctx.output_ctx.codec.as_str() == "ass" {
+        if ["ass", "ssa"].contains(&ctx.input_ctx.codec.as_str()) && ctx.output_ctx.codec.as_str() == "ass" {
             return Ok(());
         }
 

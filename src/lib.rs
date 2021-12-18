@@ -23,7 +23,6 @@ use std::collections::HashMap;
 use std::fmt;
 use std::time::Duration;
 use std::time::Instant;
-
 use async_trait::async_trait;
 use tracing::debug;
 use tracing::info;
@@ -454,5 +453,17 @@ impl StateManager {
             .ok_or(NightfallError::SessionDoesntExist)?;
 
         session.start().await.map_err(|_| NightfallError::Aborted)
+    }
+
+    #[handler]
+    async fn is_done(&self, id: String) -> Result<bool> {
+        let session = self.sessions.get(&id).ok_or(NightfallError::SessionDoesntExist)?;
+        Ok(session.is_dead())
+    }
+
+    #[handler]
+    async fn has_started(&self, id: String) -> Result<bool> {
+        let session = self.sessions.get(&id).ok_or(NightfallError::SessionDoesntExist)?;
+        Ok(session.has_started())
     }
 }
