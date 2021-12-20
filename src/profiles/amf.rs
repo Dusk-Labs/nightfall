@@ -33,7 +33,7 @@ impl TranscodingProfile for AmfTranscodeProfile {
             "-ss".into(),
             (ctx.output_ctx.start_num * ctx.output_ctx.target_gop).to_string(),
             "-i".into(),
-            ctx.file,
+            ctx.file.clone(),
             "-copyts".into(),
             "-map".into(),
             stream,
