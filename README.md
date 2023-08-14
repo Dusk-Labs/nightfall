@@ -8,4 +8,4 @@ Nightfall is a library used internally by [Dim](https://github.com/vgarleanu/dim
 3. Subtitle streaming
 
 # Dependencies
-`ffmpeg` > 4.1
+`ffmpeg` > 6.0

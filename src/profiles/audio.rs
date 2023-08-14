@@ -84,12 +84,12 @@ impl TranscodingProfile for AacTranscodeProfile {
         // timestamp.
         if ctx.output_ctx.start_num > 0 {
             args.append(&mut vec![
-                "-hls_ts_options".into(), 
+                "-hls_segment_options".into(),
                 "movflags=frag_custom+dash+delay_moov+frag_discont".into(),
             ]);
         } else {
             args.append(&mut vec![
-                "-hls_ts_options".into(), 
+                "-hls_segment_options".into(),
                 "movflags=frag_custom+dash+delay_moov".into(),
             ]);
         }
