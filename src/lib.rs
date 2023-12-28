@@ -23,6 +23,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::time::Duration;
 use std::time::Instant;
+
 use async_trait::async_trait;
 use tracing::debug;
 use tracing::info;
@@ -111,7 +112,7 @@ impl StateManager {
             .collect::<Vec<_>>()
             .join(" -> ");
 
-        let session_id = uuid::Uuid::new_v4().to_hyphenated().to_string();
+        let session_id = uuid::Uuid::new_v4().hyphenated().to_string();
         let tag = if let Some(width) = profile_args.output_ctx.width {
             let bitrate = profile_args
                 .output_ctx
@@ -138,15 +139,9 @@ impl StateManager {
         profile_args.output_ctx.outdir = format!("{}/{}", &self.outdir, session_id);
         profile_args.ffmpeg_bin = self.ffmpeg.clone();
 
-        info!(
-            "Session {} chain {}", &session_id, chain
-        );
+        info!("Session {} chain {}", &session_id, chain);
 
-        let new_session = Session::new(
-            session_id.clone(),
-            profile_chain,
-            profile_args,
-        );
+        let new_session = Session::new(session_id.clone(), profile_chain, profile_args);
 
         self.sessions.insert(session_id.clone(), new_session);
 
@@ -261,21 +256,21 @@ impl StateManager {
                     if session.chunks_since_init >= 1 {
                         debug!("Got a partial segment, patching because the user has most likely seeked.");
 
-                match patch_init_segment(
-                    session.init_seg(),
-                    chunk_path.clone(),
-                    real_segment,
-                )
-                    .await
-                    {
-                        Ok(seq) => session.real_segment = seq,
-                        Err(e) => {
-                            warn!(
-                                error = %e,
-                                "Failed to patch init segment."
-                            )
+                        match patch_init_segment(
+                            session.init_seg(),
+                            chunk_path.clone(),
+                            real_segment,
+                        )
+                        .await
+                        {
+                            Ok(seq) => session.real_segment = seq,
+                            Err(e) => {
+                                warn!(
+                                    error = %e,
+                                    "Failed to patch init segment."
+                                )
+                            }
                         }
-                    }
                     }
                 }
                 Err(e) => {
@@ -457,13 +452,19 @@ impl StateManager {
 
     #[handler]
     async fn is_done(&self, id: String) -> Result<bool> {
-        let session = self.sessions.get(&id).ok_or(NightfallError::SessionDoesntExist)?;
+        let session = self
+            .sessions
+            .get(&id)
+            .ok_or(NightfallError::SessionDoesntExist)?;
         Ok(session.is_dead())
     }
 
     #[handler]
     async fn has_started(&self, id: String) -> Result<bool> {
-        let session = self.sessions.get(&id).ok_or(NightfallError::SessionDoesntExist)?;
+        let session = self
+            .sessions
+            .get(&id)
+            .ok_or(NightfallError::SessionDoesntExist)?;
         Ok(session.has_started())
     }
 }

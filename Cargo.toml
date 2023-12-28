@@ -16,7 +16,7 @@ ssa_transmux = []
 default = ["cuda", "vaapi"]
 
 [dependencies]
-uuid = { version = "0.8.1", features = ["v4"] }
+uuid = { version = "1.6.1", features = ["v4"] }
 lazy_static = "1.4.0"
 serde_json = "1.0.57"
 serde = { version = "1.0.115", features = ["derive"] }
