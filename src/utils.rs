@@ -31,7 +31,6 @@ cfg_if::cfg_if! {
         use winapi::um::winnt::PROCESS_QUERY_INFORMATION;
         use winapi::um::processthreadsapi::OpenProcess;
         use winapi::um::processthreadsapi::GetExitCodeProcess;
-        use winapi::shared::winerror::WAIT_TIMEOUT;
         use winapi::um::minwinbase::STILL_ACTIVE;
         use winapi::shared::ntdef::NULL;
 
