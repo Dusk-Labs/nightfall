@@ -47,8 +47,9 @@ rusty_vainfo = { version = "0.1.4", optional = true }
 
 [target.'cfg(windows)'.dependencies]
 ntapi = "0.4.1"
-winapi = { version = "^0.3.9", features = [
+winapi = { version = "0.3.9", features = [
     "winerror",
     "synchapi",
     "minwinbase",
+    "processthreadsapi",
 ] }
